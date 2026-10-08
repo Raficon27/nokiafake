@@ -124,7 +124,28 @@ class MainActivity : Activity() {
     private fun sendSms(){if(composeNumber.isBlank()){toast("בחר איש קשר תחילה");return};if(messageText.isBlank()){toast("כתוב הודעה לפני השליחה");return};if(checkSelfPermission(Manifest.permission.SEND_SMS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(arrayOf(Manifest.permission.SEND_SMS),12);return};try{val sms=SmsManager.getDefault();val parts=sms.divideMessage(messageText);if(parts.size>1)sms.sendMultipartTextMessage(composeNumber,null,ArrayList(parts),null,null) else sms.sendTextMessage(composeNumber,null,messageText,null,null);try{val values=ContentValues().apply{put("address",composeNumber);put("body",messageText);put("date",System.currentTimeMillis());put("read",1);put("seen",1);put("type",2)};contentResolver.insert(Uri.parse("content://sms/sent"),values)}catch(_:Exception){};toast("ההודעה נשלחה");messageText="";screen=Screen.THREADS;loadSms()}catch(e:Exception){toast("שליחת הודעה נכשלה")}}
     private fun launchCamera(){try{startActivity(Intent(MediaStore.ACTION_IMAGE_CAPTURE))}catch(e:Exception){toast("לא נמצאה מצלמה")}}
     private fun toast(s:String){Toast.makeText(this,s,Toast.LENGTH_SHORT).show()}
-    private fun calculate(input:String):String{try{val tokens=Regex("\\d+(?:\\.\\d+)?|[+\\-*/]").findAll(input).map{it.value}.toList();val nums=java.util.ArrayDeque<Double>();val ops=java.util.ArrayDeque<Char>();fun prec(c:Char)=if(c=='+'||c=='-')1 else 2;for(t in tokens){if(t.length>1||t[0].isDigit())nums.addLast(t.toDouble())else{val op=t[0];while(ops.isNotEmpty()&&prec(ops.last())>=prec(op)){val b=nums.removeLast();val a=nums.removeLast();nums.addLast(when(ops.removeLast()){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b})};ops.addLast(op)}};while(ops.isNotEmpty()){val b=nums.removeLast();val a=nums.removeLast();nums.addLast(when(ops.removeLast()){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b})};return nums.last().toString()}catch(_:Exception){return input}}
+    private fun precedence(op:Char)=if(op=='+'||op=='-')1 else 2
+    private fun calculate(input:String):String {
+        return try {
+            val tokens=Regex("\\d+(?:\\.\\d+)?|[+\\-*/]").findAll(input).map{it.value}.toList()
+            val nums=java.util.ArrayDeque<Double>()
+            val ops=java.util.ArrayDeque<Char>()
+            for(token in tokens){
+                if(token.length>1||token[0].isDigit()) nums.addLast(token.toDouble())
+                else {
+                    val op=token[0]
+                    while(ops.isNotEmpty()&&precedence(ops.last())>=precedence(op)){
+                        val b=nums.removeLast();val a=nums.removeLast()
+                        nums.addLast(applyOp(ops.removeLast(),a,b))
+                    }
+                    ops.addLast(op)
+                }
+            }
+            while(ops.isNotEmpty()){val b=nums.removeLast();val a=nums.removeLast();nums.addLast(applyOp(ops.removeLast(),a,b))}
+            nums.last().toString()
+        } catch(_:Exception){input}
+    }
+    private fun applyOp(op:Char,a:Double,b:Double)=when(op){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b }
     override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);super.onDestroy()}
     private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(154,205,50);private val bg=Color.rgb(20,24,20);override fun onTouchEvent(event:android.view.MotionEvent)=true;override fun onDraw(c:Canvas){super.onDraw(c);c.drawColor(bg);val sx=width/480f;val sy=height/640f;c.save();c.scale(sx,sy);p.color=Color.BLACK;c.drawRect(0f,0f,480f,640f,p);p.color=green;c.drawRect(0f,0f,480f,32f,p);txt(c,"NOKIA",18f,23f,16f,Color.BLACK);txt(c,"▮ $batteryPct%",325f,23f,14f,Color.BLACK);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),420f,23f,16f,Color.BLACK,Paint.Align.RIGHT)
             when(screen){Screen.HOME->{txt(c,"${SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date())}",240f,260f,76f,Color.WHITE,Paint.Align.CENTER);txt(c,SimpleDateFormat("EEEE  d/M",Locale("he","IL")).format(Date()),240f,300f,20f,green,Paint.Align.CENTER);txt(c,"לחץ OK לפתיחת התפריט",240f,500f,18f,Color.LTGRAY,Paint.Align.CENTER)}
