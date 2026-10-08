@@ -1,6 +1,10 @@
 package com.example.nokiamode
 
 import android.app.Service
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
@@ -32,6 +36,15 @@ class SmsDeliverReceiver : BroadcastReceiver() {
             put("read", 0); put("seen", 0); put("type", 1)
         }
         try { context.contentResolver.insert(Uri.parse("content://sms/inbox"), values) } catch (_: Exception) { }
+        try {
+            val manager=context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if(android.os.Build.VERSION.SDK_INT>=26)manager.createNotificationChannel(NotificationChannel("incoming_sms","הודעות",NotificationManager.IMPORTANCE_HIGH))
+            val open=Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            val pending=PendingIntent.getActivity(context,0,open,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val notification=Notification.Builder(context,"incoming_sms")
+            notification.setSmallIcon(android.R.drawable.sym_action_email).setContentTitle("יש הודעה חדשה").setContentText("${address}: $body").setContentIntent(pending).setAutoCancel(true)
+            manager.notify((System.currentTimeMillis()%Int.MAX_VALUE).toInt(),notification.build())
+        } catch (_: Exception) { }
     }
 }
 
