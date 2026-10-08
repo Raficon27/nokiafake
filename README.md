@@ -12,12 +12,23 @@
 
 - **תפקיד SMS:** Android מציג אישור מערכת לבחירת אפליקציית SMS ברירת מחדל. האפליקציה מבקשת את התפקיד בעת פתיחה רק אם אינו מוחזק. לאחר שהמשתמש אישר, אין API ציבורי שמאפשר לאפליקציה לבטל את התפקיד כשנסגרת או לגרום למערכת לשאול שוב בכל הפעלה; רק המשתמש או המערכת יכולים לשנותו. התפקיד משפיע גם מחוץ לזמן שהאפליקציה פתוחה.
 - **מגע:** Activity מתעלמת ממגע בתוך החלון. שכבת־העל מבקשת `SYSTEM_ALERT_WINDOW` ומנסה לבלוע נגיעות כשהאפליקציה פעילה. Android שומר שליטה בחלונות ובמחוות מערכת מסוימות, ולכן אפליקציה רגילה אינה יכולה להבטיח חסימת Touch מוחלטת בכל ממשק או למנוע יציאה/מעבר לאפליקציה אחרת. אם ההרשאה נדחית, רק מסך האפליקציה עצמו מתעלם ממגע.
+- **סרגל המצב/ההתראות:** האפליקציה מפעילה Immersive Sticky ומסתירה את סרגל המצב והניווט, כולל ניסיון הסתרה דרך `WindowInsetsController` ב־Android 11 ומעלה. היא מפעילה זאת מחדש בחזרה לאפליקציה. Android עדיין מאפשר להציג סרגלים זמניים באמצעות מחוות קצה; אפליקציה רגילה אינה יכולה לחסום לצמיתות את ה־Notification Shade. לפי תיעוד Android, השבתה קבועה נתמכת רק בפריסת Android Enterprise: DPC שמוגדר כ־Device Owner יכול לקרוא ל־`DevicePolicyManager.setStatusBarDisabled()` ולהשתמש ב־Lock Task. התקנת APK רגילה או הרשאת Overlay אינן מעניקות מעמד זה, ולכן הפרויקט אינו טוען לחסימה מלאה.
 - **שיחות נכנסות:** הצגת ממשק שיחה משלנו דורשת תפקיד Dialer ברירת מחדל ו־Telecom `InCallService`. הפרויקט אינו מבקש את התפקיד הזה, ולכן Android מטפל בשיחות.
 - **יציאה:** `1234` בחייגן מסיים את הפעילות. לחצן Back/End מסוגל גם לצאת ממסכים או לסגור פעילות; אפליקציה רגילה לא יכולה לנעול את המשתמש בתוכה באופן אמין בלי מצב ניהול מכשיר ייעודי.
 
+## הסתרת סרגל המצב
+
+בגרסה זו האפליקציה מפעילה Immersive Sticky ומסתירה את סרגל המצב והניווט, לרבות דרך `WindowInsetsController` ב־Android 11 ומעלה, ומפעילה הסתרה מחדש כשחוזרים לאפליקציה. Android עדיין מאפשר להציג סרגלים זמניים במחוות קצה. אפליקציה רגילה אינה יכולה לחסום לצמיתות את לוח ההתראות: לפי תיעוד Android, השבתה קבועה נתמכת רק בפריסת Android Enterprise, שבה אפליקציית DPC מוגדרת כ־Device Owner ומשתמשת ב־`DevicePolicyManager.setStatusBarDisabled()` וב־Lock Task. התקנת APK רגילה או הרשאת Overlay לא מעניקות מעמד Device Owner, ולכן חסימה מלאה אינה אפשרית במסגרת ההתקנה הרגילה של הפרויקט.
+
+מקורות רשמיים:
+- https://developer.android.com/develop/ui/views/immersive
+- https://developer.android.com/design/ui/mobile/guides/layout-and-content/immersive-content
+- https://developer.android.com/reference/android/app/admin/DevicePolicyManager#setStatusBarDisabled(android.content.ComponentName,boolean)
+- https://developer.android.com/work/dpc/dedicated-devices/lock-task-mode
+
 ## Build
 
-GitHub Actions בונה APK Debug בכל push ל־`main` וב־workflow ידני. הקובץ נשמר כ־Actions artifact בשם `NokiaMode-debug-apk`.
+GitHub Actions בונה APK Debug בכל push ל־`main` וב־workflow ידני. הקובץ נשמר כ־Actions artifact בשם `NokiaMode-debug-apk` למשך 30 יום.
 
 לבנייה מקומית:
 
@@ -38,3 +49,10 @@ gradle --no-daemon assembleDebug
 ## MMI_RES
 
 תיקיית `MMI_RES` לא הייתה זמינה בסביבת העבודה בעת יצירת הפרויקט, ולכן לא נבנה inventory ולא הועתקו נכסי Nokia. יש להוסיף אותה לפרויקט לצורך ניתוח ושיפור העיצוב.
+
+## מקורות Android בנושא Immersive ו־Device Owner
+
+- Immersive mode: https://developer.android.com/develop/ui/views/immersive
+- הנחיות Android לתוכן Immersive ומגבלת הסתרה קבועה במכשיר אישי: https://developer.android.com/design/ui/mobile/guides/layout-and-content/immersive-content
+- `DevicePolicyManager.setStatusBarDisabled`: https://developer.android.com/reference/android/app/admin/DevicePolicyManager#setStatusBarDisabled(android.content.ComponentName,boolean)
+- Lock Task למכשירים ייעודיים: https://developer.android.com/work/dpc/dedicated-devices/lock-task-mode
