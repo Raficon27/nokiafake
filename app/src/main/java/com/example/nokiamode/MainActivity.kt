@@ -62,14 +62,35 @@ class MainActivity : Activity() {
     private val menus = listOf("אנשי קשר", "חייגן", "הודעות", "מצלמה", "תמונות", "היסטוריית שיחות", "Snake", "סרטונים", "מחשבון", "זמני היום", "הגדרות")
 
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
-        window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+        applyImmersiveMode()
         ui = NokiaView(); setContentView(ui); handler.post(clockTick); requestOverlayPermissionThenSmsRole()
         if(intent?.action==Intent.ACTION_SENDTO){composeNumber=intent.data?.schemeSpecificPart?.substringBefore('?').orEmpty();screen=Screen.COMPOSE}
     }
-    override fun onResume() { super.onResume(); @Suppress("DEPRECATION")
-        run { window.decorView.systemUiVisibility = 5894 or 1024 or 512 } }
+    override fun onResume() { super.onResume(); applyImmersiveMode() }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) window.decorView.post { applyImmersiveMode() }
+    }
+    /** Hide bars while active. Android still permits transient bars from system edge gestures. */
+    @Suppress("DEPRECATION")
+    private fun applyImmersiveMode() {
+        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            window.insetsController?.let { controller ->
+                controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+            }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            window.insetsController?.let { controller ->
+                controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+            }
+        }
+    }
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN) return true
         val key = event.keyCode
@@ -150,8 +171,8 @@ class MainActivity : Activity() {
     }
     private fun applyOp(op:Char,a:Double,b:Double)=when(op){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b }
     override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);stopService(Intent(this,TouchShieldService::class.java));super.onDestroy()}
-    private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(154,205,50);private val bg=Color.rgb(20,24,20);override fun onTouchEvent(event:android.view.MotionEvent)=true;override fun onDraw(c:Canvas){super.onDraw(c);c.drawColor(bg);val sx=width/480f;val sy=height/640f;c.save();c.scale(sx,sy);p.color=Color.BLACK;c.drawRect(0f,0f,480f,640f,p);p.color=green;c.drawRect(0f,0f,480f,32f,p);txt(c,"NOKIA",18f,23f,16f,Color.BLACK);txt(c,"▮ $batteryPct%",325f,23f,14f,Color.BLACK);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),420f,23f,16f,Color.BLACK,Paint.Align.RIGHT)
-            when(screen){Screen.HOME->{txt(c,"${SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date())}",240f,260f,76f,Color.WHITE,Paint.Align.CENTER);txt(c,SimpleDateFormat("EEEE  d/M",Locale("he","IL")).format(Date()),240f,300f,20f,green,Paint.Align.CENTER);txt(c,"לחץ OK לפתיחת התפריט",240f,500f,18f,Color.LTGRAY,Paint.Align.CENTER)}
+    private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(184,220,62);private val bg=Color.rgb(4,29,40);override fun onTouchEvent(event:android.view.MotionEvent)=true;override fun onDraw(c:Canvas){super.onDraw(c);val sx=width/480f;val sy=height/640f;c.save();c.scale(sx,sy);p.shader=android.graphics.LinearGradient(0f,0f,0f,640f,Color.rgb(5,43,54),Color.rgb(2,19,29),android.graphics.Shader.TileMode.CLAMP);c.drawRect(0f,0f,480f,640f,p);p.shader=null;p.color=Color.rgb(9,19,24);c.drawRect(0f,0f,480f,34f,p);txt(c,"NOKIA",18f,23f,15f,Color.rgb(242,240,216));drawSignal(c,347f,9f);drawBattery(c,379f,9f);txt(c,"$batteryPct%",423f,23f,13f,Color.rgb(242,240,216));txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),462f,23f,15f,Color.rgb(242,240,216),Paint.Align.RIGHT)
+            when(screen){Screen.HOME->{p.color=0x1836D665;for(y in 88..477 step 5)c.drawRect(0f,y.toFloat(),480f,y+1f,p);p.color=0x4439C5B3;p.style=Paint.Style.STROKE;p.strokeWidth=2f;c.drawCircle(240f,274f,137f,p);c.drawCircle(240f,274f,122f,p);p.style=Paint.Style.FILL;txt(c,"NOKIA",240f,176f,22f,Color.rgb(242,240,216),Paint.Align.CENTER);p.typeface=android.graphics.Typeface.create("sans-serif-condensed",android.graphics.Typeface.NORMAL);txt(c,"${SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date())}",240f,286f,88f,Color.rgb(242,240,216),Paint.Align.CENTER);p.typeface=android.graphics.Typeface.DEFAULT;txt(c,SimpleDateFormat("EEEE  d/M",Locale("he","IL")).format(Date()),240f,330f,19f,green,Paint.Align.CENTER);txt(c,"יום טוב",240f,422f,16f,0xFF9BB1B0,Paint.Align.CENTER);txt(c,"לחץ OK לפתיחת התפריט",240f,520f,16f,Color.rgb(242,240,216),Paint.Align.CENTER)}
                 Screen.MENU->{title(c,"תפריט");drawRows(c,menus,cursor)}
                 Screen.CONTACTS->{title(c,if(contactSearch.isBlank())"אנשי קשר" else "חיפוש: $contactSearch");val list=visibleContacts().map{it.name+"   "+it.number};if(list.isEmpty())txt(c,"אין התאמות",240f,300f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,list,cursor)}
                 Screen.CONTACT->{title(c,selected.name);txt(c,selected.number,240f,260f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,"OK: חייג   CALL: שיחה",240f,500f,17f,green,Paint.Align.CENTER)}
@@ -166,13 +187,15 @@ class MainActivity : Activity() {
                 Screen.ZMANIM->{title(c,"זמני היום");listOf("עלות השחר","טלית ותפילין","הנץ החמה","סוף זמן שמע","חצות היום","מנחה גדולה","מנחה קטנה","פלג המנחה","שקיעה","צאת הכוכבים").forEachIndexed{i,s->row(c,i,"$s       —",i==cursor)};txt(c,"הזמנים דורשים מיקום והגדרות הלכתיות",240f,535f,14f,Color.GRAY,Paint.Align.CENTER)}
                 Screen.SETTINGS->{title(c,"הגדרות");listOf("שפה: עברית","תצוגה: ירוק","חזרה למסך בית").forEachIndexed{i,s->row(c,i,s,i==cursor)}}
                 Screen.HELP->{title(c,"מידע");wrap(c,notice,35f,120f,410f,30f)} }
-            p.color=green;c.drawRect(0f,590f,480f,640f,p);txt(c,softLeft(),70f,622f,17f,Color.BLACK);txt(c,softRight(),410f,622f,17f,Color.BLACK,Paint.Align.RIGHT);c.restore()}
-            private fun title(c:Canvas,s:String){txt(c,s,240f,70f,24f,green,Paint.Align.CENTER)}
+            p.color=Color.rgb(7,16,21);c.drawRect(0f,583f,480f,640f,p);p.color=green;c.drawRect(0f,583f,480f,585f,p);txt(c,softLeft(),34f,620f,17f,Color.rgb(242,240,216));txt(c,softRight(),446f,620f,17f,Color.rgb(242,240,216),Paint.Align.RIGHT);txt(c,"●",240f,621f,13f,green,Paint.Align.CENTER);c.restore()}
+            private fun drawSignal(c:Canvas,x:Float,y:Float){p.color=green;for(i in 0..3)c.drawRect(x+i*6f,y+13f-i*3f,x+4f+i*6f,22f,p)}
+            private fun drawBattery(c:Canvas,x:Float,y:Float){p.color=Color.rgb(242,240,216);p.style=Paint.Style.STROKE;p.strokeWidth=1.5f;c.drawRect(x,y,x+20f,y+13f,p);c.drawRect(x+20f,y+4f,x+23f,y+9f,p);p.style=Paint.Style.FILL;p.color=green;c.drawRect(x+2f,y+2f,x+2f+16f*batteryPct.coerceIn(0,100)/100f,y+11f,p)}
+            private fun title(c:Canvas,s:String){p.color=green;c.drawRect(0f,35f,480f,83f,p);txt(c,s,444f,68f,23f,Color.rgb(4,23,30),Paint.Align.RIGHT);p.color=0x665F7730;c.drawRect(0f,82f,480f,84f,p)}
             private fun drawRows(c:Canvas,items:List<String>,selected:Int){val start=(selected-8).coerceAtLeast(0);items.drop(start).take(10).forEachIndexed{i,s->row(c,i,s,start+i==selected)}}
-            private fun row(c:Canvas,i:Int,s:String,on:Boolean){val y=96f+i*48f;if(y>570) return;if(on){p.color=green;c.drawRect(12f,y,468f,y+42,p)};val fg=if(on)Color.BLACK else Color.WHITE;p.color=fg;p.style=Paint.Style.STROKE;p.strokeWidth=1.5f;c.drawRoundRect(RectF(22f,y+9,44f,y+32),4f,4f,p);p.style=Paint.Style.FILL;val mark=when{ s.contains("אנשי קשר")->"א";s.contains("הודעות")->"✉";s.contains("מצלמה")->"◉";s.contains("תמונות")->"▣";s.contains("שיחות")->"☎";s.contains("Snake")->"S";s.contains("מחשבון")->"±";s.contains("זמני")->"☼";s.contains("הגדרות")->"⚙";else->"›"};txt(c,mark,33f,y+26,13f,fg,Paint.Align.CENTER);txt(c,s,440f,y+29,19f,fg,Paint.Align.RIGHT)}
+            private fun row(c:Canvas,i:Int,s:String,on:Boolean){val y=92f+i*46f;if(y>570) return;if(on){p.color=green;c.drawRect(9f,y,471f,y+41,p);p.color=0xFF86A42A;c.drawRect(9f,y,13f,y+41,p)}else{p.color=0x553E656B;c.drawRect(18f,y+40,462f,y+41,p)};val fg=if(on)Color.rgb(5,28,35) else Color.rgb(242,240,216);p.color=fg;p.style=Paint.Style.STROKE;p.strokeWidth=1.5f;c.drawRect(25f,y+9,49f,y+32,p);p.style=Paint.Style.FILL;val mark=when{ s.contains("אנשי קשר")->"א";s.contains("הודעות")->"✉";s.contains("מצלמה")->"◉";s.contains("תמונות")->"▣";s.contains("שיחות")->"☎";s.contains("Snake")->"S";s.contains("מחשבון")->"±";s.contains("זמני")->"☼";s.contains("הגדרות")->"⚙";else->"›"};txt(c,mark,37f,y+26,14f,fg,Paint.Align.CENTER);txt(c,s,447f,y+28,19f,fg,Paint.Align.RIGHT)}
             private fun softLeft()=when(screen){Screen.HOME->"אנשי קשר";Screen.CONTACT,Screen.CONVERSATION->"SMS";Screen.COMPOSE->"שלח";else->"בחר"}
             private fun softRight()=if(screen==Screen.HOME)"הודעות" else "חזרה"
-            private fun txt(c:Canvas,s:String,x:Float,y:Float,size:Float,color:Int,align:Paint.Align=Paint.Align.RIGHT){p.color=color;p.textSize=size;p.typeface=android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL);p.textAlign=align;c.drawText(s,x,y,p)}
+            private fun txt(c:Canvas,s:String,x:Float,y:Float,size:Float,color:Int,align:Paint.Align=Paint.Align.RIGHT){p.color=color;p.textSize=size;p.typeface=android.graphics.Typeface.create("sans-serif-condensed",android.graphics.Typeface.NORMAL);p.textAlign=align;c.drawText(s,x,y,p)}
             private fun wrap(c:Canvas,s:String,x:Float,y:Float,w:Float,lh:Float){val words=s.split(" ");var line="";var yy=y;for(word in words){if(p.measureText(line+word)>w){txt(c,line,x+w,yy,18f,Color.WHITE);line="";yy+=lh};line+=word+" "};txt(c,line,x+w,yy,18f,Color.WHITE)}
         }
 }
