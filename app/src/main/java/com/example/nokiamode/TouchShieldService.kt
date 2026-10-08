@@ -19,7 +19,7 @@ class TouchShieldService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (shield != null) return START_STICKY
+        if (shield != null) return START_NOT_STICKY
         if (Build.VERSION.SDK_INT < 26) { stopSelf(); return START_NOT_STICKY }
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         shield = object : View(this) {
@@ -35,7 +35,7 @@ class TouchShieldService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.START; alpha = 0.01f }
         try { windowManager?.addView(shield, params) } catch (_: Exception) { stopSelf() }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
