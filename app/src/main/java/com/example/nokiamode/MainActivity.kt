@@ -3,6 +3,7 @@ package com.example.nokiamode
 import android.Manifest
 import android.app.Activity
 import android.app.role.RoleManager
+import android.provider.Settings
 import android.content.Intent
 import android.content.ContentValues
 import android.content.pm.PackageManager
@@ -64,7 +65,7 @@ class MainActivity : Activity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
-        ui = NokiaView(); setContentView(ui); handler.post(clockTick); requestSmsRoleIfNeeded()
+        ui = NokiaView(); setContentView(ui); handler.post(clockTick); requestOverlayPermissionThenSmsRole()
         if(intent?.action==Intent.ACTION_SENDTO){composeNumber=intent.data?.schemeSpecificPart?.substringBefore('?').orEmpty();screen=Screen.COMPOSE}
     }
     override fun onResume() { super.onResume(); @Suppress("DEPRECATION")
@@ -111,8 +112,10 @@ class MainActivity : Activity() {
     private fun back() { if(screen==Screen.HOME){finish()} else if(screen==Screen.CONTACT){screen=Screen.CONTACTS} else if(screen==Screen.HELP){screen=previous} else if(screen==Screen.DIALER){dial="";screen=Screen.MENU} else if(screen==Screen.COMPOSE){screen=Screen.THREADS} else screen=Screen.MENU;cursor=0;ui.invalidate() }
     private fun softLeft(){when(screen){Screen.HOME->{contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.CONTACT->{composeNumber=selected.number;messageText="";multiMode=0;screen=Screen.COMPOSE};Screen.CONVERSATION->{messageText="";multiMode=0;screen=Screen.COMPOSE};Screen.THREADS->{contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.COMPOSE->sendSms();else->select()}}
     private fun softRight(){if(screen==Screen.HOME){loadSms();screen=Screen.THREADS}else back()}
-    private fun requestSmsRoleIfNeeded(){if(android.os.Build.VERSION.SDK_INT>=29){val manager=getSystemService(RoleManager::class.java);if(manager!=null&&manager.isRoleAvailable(RoleManager.ROLE_SMS)&&!manager.isRoleHeld(RoleManager.ROLE_SMS)){startActivityForResult(manager.createRequestRoleIntent(RoleManager.ROLE_SMS),20)}}}
-    @Deprecated("Role request result") override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){super.onActivityResult(requestCode,resultCode,data);if(requestCode==20){if(resultCode==RESULT_OK){toast("אפליקציית SMS נבחרה");loadSms()}else toast("ללא תפקיד SMS, גישה לשרשורים מוגבלת")}}
+    private fun requestOverlayPermissionThenSmsRole(){if(android.os.Build.VERSION.SDK_INT>=23&&!Settings.canDrawOverlays(this)){toast("כדי לחסום נגיעות צריך לאשר הצגה מעל אפליקציות אחרות");startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:$packageName")),21)}else requestSmsRoleIfNeeded()}
+    private fun requestSmsRoleIfNeeded(){if(android.os.Build.VERSION.SDK_INT>=29){val manager=getSystemService(RoleManager::class.java);if(manager!=null&&manager.isRoleAvailable(RoleManager.ROLE_SMS)&&!manager.isRoleHeld(RoleManager.ROLE_SMS)){startActivityForResult(manager.createRequestRoleIntent(RoleManager.ROLE_SMS),20);return}};startTouchShield()}
+    private fun startTouchShield(){if(android.os.Build.VERSION.SDK_INT>=23&&Settings.canDrawOverlays(this))try{startService(Intent(this,TouchShieldService::class.java))}catch(_:Exception){toast("לא ניתן להפעיל חסימת מגע")}}
+    @Deprecated("Role and overlay settings result") override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){super.onActivityResult(requestCode,resultCode,data);if(requestCode==21){if(android.os.Build.VERSION.SDK_INT<23||Settings.canDrawOverlays(this))requestSmsRoleIfNeeded()else{toast("חסימת מגע מלאה לא אושרה; בתוך האפליקציה המגע עדיין מנוטרל");requestSmsRoleIfNeeded()}}else if(requestCode==20){if(resultCode==RESULT_OK){toast("אפליקציית SMS נבחרה");loadSms()}else toast("ללא תפקיד SMS, גישה לשרשורים מוגבלת");startTouchShield()}}
     private fun multiTap(d:String){if(d=="#"){multiMode=(multiMode+1)%3;lastMultiKey="";toast(when(multiMode){0->"עברית";1->"English";else->"123"});return};if(d=="0"){messageText+=" ";lastMultiKey="";return};val letters=when(multiMode){0->mapOf("2" to "אבג","3" to "דהו","4" to "זחט","5" to "יכל","6" to "מנס","7" to "עפצ","8" to "קרש","9" to "שתץ");1->mapOf("2" to "abc2","3" to "def3","4" to "ghi4","5" to "jkl5","6" to "mno6","7" to "pqrs7","8" to "tuv8","9" to "wxyz9");else->emptyMap()};val chars=letters[d];if(chars==null){messageText+=d;lastMultiKey="";return};val now=System.currentTimeMillis();if(lastMultiKey==d&&now-lastMultiAt<900&&messageText.isNotEmpty()){messageText=messageText.dropLast(1);multiIndex=(multiIndex+1)%chars.length;messageText+=chars[multiIndex]}else{multiIndex=0;messageText+=chars[0]};lastMultiKey=d;lastMultiAt=now}
     private fun callOrAnswer() { if(screen==Screen.CONTACT)dial=selected.number;if(dial.isBlank()) return; if(checkSelfPermission(Manifest.permission.CALL_PHONE)!=PackageManager.PERMISSION_GRANTED){requestPermissions(arrayOf(Manifest.permission.CALL_PHONE),11);return}; try{startActivity(Intent(Intent.ACTION_CALL,Uri.parse("tel:$dial")))}catch(e:Exception){toast("לא ניתן לבצע שיחה במכשיר") } }
     private fun visibleContacts()=if(contactSearch.isBlank())contacts else contacts.filter{it.number.contains(contactSearch)||it.name.contains(contactSearch,true)}
@@ -146,7 +149,7 @@ class MainActivity : Activity() {
         } catch(_:Exception){input}
     }
     private fun applyOp(op:Char,a:Double,b:Double)=when(op){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b }
-    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);super.onDestroy()}
+    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);stopService(Intent(this,TouchShieldService::class.java));super.onDestroy()}
     private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(154,205,50);private val bg=Color.rgb(20,24,20);override fun onTouchEvent(event:android.view.MotionEvent)=true;override fun onDraw(c:Canvas){super.onDraw(c);c.drawColor(bg);val sx=width/480f;val sy=height/640f;c.save();c.scale(sx,sy);p.color=Color.BLACK;c.drawRect(0f,0f,480f,640f,p);p.color=green;c.drawRect(0f,0f,480f,32f,p);txt(c,"NOKIA",18f,23f,16f,Color.BLACK);txt(c,"▮ $batteryPct%",325f,23f,14f,Color.BLACK);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),420f,23f,16f,Color.BLACK,Paint.Align.RIGHT)
             when(screen){Screen.HOME->{txt(c,"${SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date())}",240f,260f,76f,Color.WHITE,Paint.Align.CENTER);txt(c,SimpleDateFormat("EEEE  d/M",Locale("he","IL")).format(Date()),240f,300f,20f,green,Paint.Align.CENTER);txt(c,"לחץ OK לפתיחת התפריט",240f,500f,18f,Color.LTGRAY,Paint.Align.CENTER)}
                 Screen.MENU->{title(c,"תפריט");drawRows(c,menus,cursor)}
