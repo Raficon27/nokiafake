@@ -38,7 +38,8 @@ class SetupActivity : Activity() {
 
     private fun grants(): List<Grant> {
         val common = mutableListOf(
-            Grant("חסימת מגע", "הצגה מעל אפליקציות", kind = "overlay"),
+            Grant("חסימת מגע", if (Build.VERSION.SDK_INT >= 30)
+                "ברשימה בחר מצב Nokia ואשר" else "אשר הצגה מעל אפליקציות", kind = "overlay"),
             Grant("מצלמה", "צילום בתוך מצב Nokia", arrayOf(Manifest.permission.CAMERA)),
             Grant("גלריה וסרטונים", "קריאת תמונות וסרטונים", mediaPermissions()),
             Grant("מוזיקה", "קריאת קובצי שמע", audioPermission()),
@@ -73,8 +74,14 @@ class SetupActivity : Activity() {
     }
     private fun activate(g: Grant) {
         when (g.kind) {
-            "overlay" -> if (!granted(g)) startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")))
+            "overlay" -> if (!granted(g)) {
+                Toast.makeText(this, if (Build.VERSION.SDK_INT >= 30)
+                    "ברשימת Android בחר מצב Nokia, אשר וחזור לכאן" else
+                    "אשר הצגה מעל אפליקציות וחזור לכאן", Toast.LENGTH_LONG).show()
+                try { startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")), 33) }
+                catch (_: Exception) { openAppSettings() }
+            }
             "sms" -> if (!granted(g) && Build.VERSION.SDK_INT >= 29) {
                 getSystemService(RoleManager::class.java)?.let { rm ->
                     if (rm.isRoleAvailable(RoleManager.ROLE_SMS))
@@ -87,9 +94,17 @@ class SetupActivity : Activity() {
                     if (!granted(sms)) { activate(sms); return }
                 }
                 val missing = g.permissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-                if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 31)
+                if (missing.isNotEmpty()) {
+                    val prefs = getPreferences(MODE_PRIVATE)
+                    if (missing.any { prefs.getBoolean("blocked_" + it, false) }) openAppSettings()
+                    else requestPermissions(missing.toTypedArray(), 31)
+                }
             }
         }
+    }
+    private fun openAppSettings() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:$packageName")))
     }
     private fun launch() {
         val missing = grants().firstOrNull { !granted(it) }
@@ -132,6 +147,15 @@ class SetupActivity : Activity() {
     override fun onResume() { super.onResume(); if (::view.isInitialized) view.invalidate() }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
+        if (requestCode == 31) {
+            val edit = getPreferences(MODE_PRIVATE).edit()
+            permissions.forEachIndexed { i, permission ->
+                edit.putBoolean("blocked_" + permission,
+                    results.getOrNull(i) != PackageManager.PERMISSION_GRANTED &&
+                        !shouldShowRequestPermissionRationale(permission))
+            }
+            edit.apply()
+        }
         if (::view.isInitialized) view.invalidate()
     }
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
