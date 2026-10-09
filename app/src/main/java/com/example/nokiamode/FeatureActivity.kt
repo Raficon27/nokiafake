@@ -625,6 +625,15 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
             text(c, "חזרה", 447f, 620f, 18f)
             c.restore()
         }
-        override fun onTouchEvent(event: android.view.MotionEvent): Boolean = true
+        private val fallbackExit = CornerExitDetector()
+        override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+            if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN &&
+                fallbackExit.onDown(event.x, event.y, width.toFloat(), height.toFloat(),
+                    android.os.SystemClock.elapsedRealtime())) {
+                sendBroadcast(Intent(TouchShieldService.ACTION_EXIT).setPackage(packageName))
+                finish()
+            }
+            return true
+        }
     }
 }
