@@ -30,7 +30,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { HOME, MENU, CONTACTS, CONTACT, DIALER, DEMO_CALL, THREADS, CONVERSATION, CALLLOG, COMPOSE, GALLERY, VIDEOS, CALC, SNAKE, ZMANIM, SETTINGS, KEYS, HELP }
+private enum class Screen { HOME, MENU, CONTACTS, CONTACT, DIALER, DEMO_CALL, THREADS, RECIPIENT, CONVERSATION, CALLLOG, COMPOSE, GALLERY, VIDEOS, CALC, SNAKE, ZMANIM, SETTINGS, KEYS, HELP }
 private data class Person(val name: String, val number: String)
 private data class SmsItem(val address: String, val body: String, val date: Long, val type: Int)
 
@@ -65,6 +65,7 @@ class MainActivity : Activity() {
     private var dial = ""
     private var messageText = ""
     private var composeNumber = ""
+    private var recipientNumber = ""
     private var selected = Person("", "")
     private var notice = ""
     private var calcInput = ""
@@ -85,11 +86,13 @@ class MainActivity : Activity() {
         demoMode = ModeStore.get(this) == NokiaMode.DEMO
         ModeStore.start(this)
         applyImmersiveMode()
-        ui = NokiaView(); setContentView(ui); handler.post(clockTick); startTouchShield()
+        ui = NokiaView(); setContentView(ui); handler.post(clockTick)
         val filter = IntentFilter(TouchShieldService.ACTION_EXIT)
         if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(exitReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(exitReceiver, filter)
         exitReceiverRegistered = true
+        StatusBarControl.enable(this)
+        startTouchShield()
         if(intent?.action==Intent.ACTION_SENDTO && !demoMode){
             composeNumber=intent.data?.schemeSpecificPart?.substringBefore('?').orEmpty()
             editor.reset();screen=Screen.COMPOSE
@@ -128,6 +131,7 @@ class MainActivity : Activity() {
             KeyAction.CALL -> if (screen == Screen.COMPOSE) sendSms() else callOrAnswer()
             KeyAction.DELETE -> when(screen) {
                 Screen.DIALER -> dial = dial.dropLast(1)
+                Screen.RECIPIENT -> recipientNumber = recipientNumber.dropLast(1)
                 Screen.COMPOSE -> { editor.delete(); messageText = editor.text }
                 Screen.CALC -> calcInput = calcInput.dropLast(1)
                 Screen.CONTACTS -> { searchEditor.delete(); contactSearch = searchEditor.text; cursor = 0 }
@@ -148,7 +152,7 @@ class MainActivity : Activity() {
         else -> cursor=(cursor+n).coerceIn(0,maxIndex())
     } }
     private fun maxIndex() = when(screen){Screen.MENU->menus.lastIndex; Screen.CONTACTS->(visibleContacts().size-1).coerceAtLeast(0); Screen.THREADS->(smsAddresses.size-1).coerceAtLeast(0); Screen.CONVERSATION->(selectedThread.size-1).coerceAtLeast(0); Screen.CALLLOG->(callRows.size-1).coerceAtLeast(0); Screen.SETTINGS->4; else->0}
-    private fun enterDigit(d:String) { when(screen){Screen.DIALER->dial+=d; Screen.COMPOSE->{editor.insert(d,android.os.SystemClock.elapsedRealtime());messageText=editor.text}; Screen.CALC->calcInput+=when(d){"*"->"*";"#"->"/";else->d}; Screen.SNAKE->when(d){"2"->turnSnake(0,-1);"8"->turnSnake(0,1);"4"->turnSnake(-1,0);"6"->turnSnake(1,0);else->{}};Screen.CONTACTS->{searchEditor.insert(d,android.os.SystemClock.elapsedRealtime());contactSearch=searchEditor.text;cursor=0};else->{}} }
+    private fun enterDigit(d:String) { when(screen){Screen.DIALER->dial+=d; Screen.RECIPIENT->recipientNumber+=d; Screen.COMPOSE->{editor.insert(d,android.os.SystemClock.elapsedRealtime());messageText=editor.text}; Screen.CALC->calcInput+=when(d){"*"->"*";"#"->"/";else->d}; Screen.SNAKE->when(d){"2"->turnSnake(0,-1);"8"->turnSnake(0,1);"4"->turnSnake(-1,0);"6"->turnSnake(1,0);else->{}};Screen.CONTACTS->{searchEditor.insert(d,android.os.SystemClock.elapsedRealtime());contactSearch=searchEditor.text;cursor=0};else->{}} }
     private fun turnSnake(dx:Int,dy:Int){if(dx==-snakeDirection.first&&dy==-snakeDirection.second)return;snakeDirection=Pair(dx,dy)}
     private fun snakeStep(dx:Int,dy:Int){val head=snakeBody.first();val next=Pair((head.first+dx+20)%20,(head.second+dy+20)%20);if(snakeBody.dropLast(1).contains(next)){snakeBody.clear();snakeBody.addAll(listOf(Pair(5,5),Pair(4,5),Pair(3,5)));snakeScore=0;snakeDirection=Pair(1,0);return};snakeBody.add(0,next);snakeX=next.first;snakeY=next.second;if(next.first==foodX&&next.second==foodY){snakeScore++;foodX=(foodX*7+3)%20;foodY=(foodY*11+5)%20}else snakeBody.removeAt(snakeBody.lastIndex)}
     private fun select() { when(screen) {
@@ -165,7 +169,10 @@ class MainActivity : Activity() {
         Screen.CONTACTS -> { val list=visibleContacts();if(list.isNotEmpty()){selected=list[cursor.coerceIn(0,list.lastIndex)];open(Screen.CONTACT)} }
         Screen.CONTACT -> { dial=selected.number;dialerReturn=Screen.CONTACT;screen=Screen.DIALER }
         Screen.DIALER -> callOrAnswer()
-        Screen.THREADS -> {val address=smsAddresses.getOrNull(cursor);if(address!=null){selectedThread=smsItems.filter{it.address==address}.sortedBy{it.date}.toMutableList();composeNumber=address;open(Screen.CONVERSATION)}}
+        Screen.THREADS -> {val address=smsAddresses.getOrNull(cursor);if(address!=null){selectedThread=smsItems.filter{it.address==address}.sortedBy{it.date}.toMutableList();composeNumber=address;open(Screen.CONVERSATION)}else newMessage()}
+        Screen.RECIPIENT -> if (recipientNumber.any { it.isDigit() }) {
+            composeNumber=recipientNumber;editor.reset();messageText="";composeReturn=Screen.THREADS;screen=Screen.COMPOSE
+        } else toast("הקלד מספר נמען")
         Screen.CONVERSATION -> {editor.reset();messageText="";composeReturn=Screen.CONVERSATION;screen=Screen.COMPOSE}
         Screen.DEMO_CALL -> demoCallActive=true
         Screen.COMPOSE -> sendSms()
@@ -181,12 +188,14 @@ class MainActivity : Activity() {
     private fun open(s:Screen, text:String?=null) { previous=screen;screen=s;cursor=0; if(text!=null){notice=text;screen=Screen.HELP};if(screen==Screen.SNAKE){snakeBody.clear();snakeBody.addAll(listOf(Pair(5,5),Pair(4,5),Pair(3,5)));snakeScore=0;snakeDirection=Pair(1,0);handler.removeCallbacks(snakeTick);handler.postDelayed(snakeTick,500)}else handler.removeCallbacks(snakeTick) }
     private fun feature(name:String) { startActivity(Intent(this, FeatureActivity::class.java).putExtra("feature",name)) }
     private fun leaveMode() { ModeStore.stop(this);finish() }
+    private fun newMessage() { recipientNumber="";screen=Screen.RECIPIENT;cursor=0 }
     private fun back() { when(screen) {
         Screen.HOME -> return
         Screen.CONTACT -> screen=Screen.CONTACTS
         Screen.CONTACTS -> screen=contactsReturn
         Screen.CONVERSATION -> screen=Screen.THREADS
         Screen.THREADS -> screen=threadsReturn
+        Screen.RECIPIENT -> screen=Screen.THREADS
         Screen.HELP -> screen=previous
         Screen.KEYS -> screen=Screen.SETTINGS
         Screen.DEMO_CALL -> { demoCallActive=false;screen=Screen.DIALER }
@@ -194,7 +203,7 @@ class MainActivity : Activity() {
         Screen.COMPOSE -> {editor.reset();messageText="";screen=composeReturn}
         else -> screen=Screen.MENU
     };cursor=0;ui.invalidate() }
-    private fun softLeft(){when(screen){Screen.HOME->{contactsReturn=Screen.HOME;searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.CONTACT->{composeNumber=selected.number;composeReturn=Screen.CONTACT;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.CONVERSATION->{composeReturn=Screen.CONVERSATION;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.THREADS->{contactsReturn=Screen.THREADS;searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.COMPOSE->sendSms();else->select()}}
+    private fun softLeft(){when(screen){Screen.HOME->{contactsReturn=Screen.HOME;searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.CONTACT->{composeNumber=selected.number;composeReturn=Screen.CONTACT;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.CONVERSATION->{composeReturn=Screen.CONVERSATION;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.THREADS->newMessage();Screen.COMPOSE->sendSms();else->select()}}
     private fun softRight(){if(screen==Screen.HOME){threadsReturn=Screen.HOME;loadSms();screen=Screen.THREADS}else back()}
     private fun startTouchShield() {
         if (android.os.Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
@@ -215,7 +224,7 @@ class MainActivity : Activity() {
     private fun visibleContacts()=if(contactSearch.isBlank())contacts else contacts.filter{it.number.contains(contactSearch)||it.name.contains(contactSearch,true)}
     private fun dialName():String {val digits=dial.filter{it.isDigit()};if(digits.length<3)return "";return contacts.firstOrNull{person->person.number.filter{it.isDigit()}==digits}?.name.orEmpty()}
     private fun loadContacts() { if(checkSelfPermission(Manifest.permission.READ_CONTACTS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת אנשי קשר");return}; try { contacts.clear(); val c=contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,ContactsContract.CommonDataKinds.Phone.NUMBER),null,null,ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME+" COLLATE LOCALIZED ASC"); c?.use { while(it.moveToNext()) contacts.add(Person(it.getString(0)?:"ללא שם",it.getString(1)?:"")) };ui.invalidate() }catch(_:Exception){toast("לא ניתן לקרוא אנשי קשר")} }
-    private fun loadSms(){smsItems.clear();smsAddresses.clear();if(checkSelfPermission(Manifest.permission.READ_SMS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת הודעות");return};try{contentResolver.query(Uri.parse("content://sms"),arrayOf("address","body","date","type"),null,null,"date DESC")?.use{c->while(c.moveToNext()){val address=c.getString(0)?:"";smsItems.add(SmsItem(address,c.getString(1)?:"",c.getLong(2),c.getInt(3)))}};if(demoMode)smsItems.addAll(demoOutbox);smsItems.sortByDescending{it.date};smsAddresses=smsItems.map{it.address}.filter{it.isNotBlank()}.distinct().toMutableList()}catch(_:Exception){toast("לא ניתן לקרוא הודעות")}}
+    private fun loadSms(){smsItems.clear();smsAddresses.clear();if(demoMode){smsItems.addAll(demoOutbox.sortedByDescending{it.date});smsAddresses=smsItems.map{it.address}.filter{it.isNotBlank()}.distinct().toMutableList();return};if(checkSelfPermission(Manifest.permission.READ_SMS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת הודעות");return};try{contentResolver.query(Uri.parse("content://sms"),arrayOf("address","body","date","type"),null,null,"date DESC")?.use{c->while(c.moveToNext()){val address=c.getString(0)?:"";smsItems.add(SmsItem(address,c.getString(1)?:"",c.getLong(2),c.getInt(3)))}};smsItems.sortByDescending{it.date};smsAddresses=smsItems.map{it.address}.filter{it.isNotBlank()}.distinct().toMutableList()}catch(_:Exception){toast("לא ניתן לקרוא הודעות")}}
     private var callRows=mutableListOf<String>()
     private fun loadCallLog(){callRows.clear();if(checkSelfPermission(Manifest.permission.READ_CALL_LOG)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת יומן שיחות");return};try{contentResolver.query(android.provider.CallLog.Calls.CONTENT_URI,arrayOf(android.provider.CallLog.Calls.NUMBER,android.provider.CallLog.Calls.TYPE),null,null,android.provider.CallLog.Calls.DATE+" DESC")?.use{c->while(c.moveToNext()){val t=when(c.getInt(1)){android.provider.CallLog.Calls.INCOMING_TYPE->"נכנסת";android.provider.CallLog.Calls.MISSED_TYPE->"שלא נענתה";else->"יוצאת"};callRows.add("$t   ${c.getString(0)?:""}")}}}catch(_:Exception){toast("לא ניתן לקרוא יומן שיחות")}}
     override fun onRequestPermissionsResult(requestCode:Int, permissions:Array<out String>, grantResults:IntArray){super.onRequestPermissionsResult(requestCode,permissions,grantResults);if(requestCode==10&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)loadContacts() else if(requestCode==11&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)callOrAnswer() else if(requestCode==12&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)sendSms() else if(requestCode==13&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)loadCallLog() else if(requestCode==14&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)loadSms() else if(grantResults.firstOrNull()!=PackageManager.PERMISSION_GRANTED)toast("ההרשאה לא ניתנה; הפונקציה אינה זמינה");ui.invalidate()}
@@ -244,16 +253,11 @@ class MainActivity : Activity() {
         } catch(_:Exception){input}
     }
     private fun applyOp(op:Char,a:Double,b:Double)=when(op){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b }
-    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);stopService(Intent(this,TouchShieldService::class.java));super.onDestroy()}
-    private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(255,151,59);private val bg=Color.rgb(16,14,29);private var fallbackTaps=0;private var lastTap=0L
+    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);stopService(Intent(this,TouchShieldService::class.java));StatusBarControl.disable(this);super.onDestroy()}
+    private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(255,151,59);private val bg=Color.rgb(16,14,29);private val fallbackExit=CornerExitDetector()
         override fun onTouchEvent(event:android.view.MotionEvent):Boolean{
-            if(event.action==android.view.MotionEvent.ACTION_UP){
-                val now=android.os.SystemClock.elapsedRealtime()
-                val corner=event.x<width*0.18f&&event.y<height*0.14f
-                fallbackTaps=if(corner){if(now-lastTap<1500)fallbackTaps+1 else 1}else 0
-                lastTap=now
-                if(fallbackTaps>=10)leaveMode()
-            }
+            if(event.actionMasked==android.view.MotionEvent.ACTION_DOWN &&
+                fallbackExit.onDown(event.x,event.y,width.toFloat(),height.toFloat(),android.os.SystemClock.elapsedRealtime())) leaveMode()
             return true
         }
         override fun onDraw(c:Canvas){super.onDraw(c);val sx=width/480f;val sy=height/640f;c.save();c.scale(sx,sy);p.shader=android.graphics.LinearGradient(0f,0f,0f,640f,Color.rgb(55,52,74),bg,android.graphics.Shader.TileMode.CLAMP);c.drawRect(0f,0f,480f,640f,p);p.shader=null;p.color=Color.rgb(49,48,69);c.drawRect(0f,0f,480f,34f,p);txt(c,"NOKIA",18f,23f,15f,Color.WHITE,Paint.Align.LEFT);drawSignal(c,347f,9f);drawBattery(c,379f,9f);txt(c,"$batteryPct%",423f,23f,13f,Color.WHITE);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),462f,23f,15f,Color.WHITE,Paint.Align.RIGHT)
@@ -263,7 +267,8 @@ class MainActivity : Activity() {
                 Screen.CONTACT->{title(c,selected.name);txt(c,selected.number,240f,260f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,"OK: חייג   CALL: שיחה",240f,500f,17f,green,Paint.Align.CENTER)}
                 Screen.DIALER->{title(c,"חייגן");txt(c,dial.ifBlank{"הקלד מספר"},240f,257f,40f,Color.WHITE,Paint.Align.CENTER);val name=dialName();if(name.isNotEmpty())txt(c,name,240f,318f,24f,green,Paint.Align.CENTER);txt(c,"CALL לחיוג · מחיקה לתיקון",240f,480f,19f,Color.WHITE,Paint.Align.CENTER)}
                 Screen.DEMO_CALL->{title(c,"שיחה מדומה");p.color=0xFFB5C8DA.toInt();c.drawCircle(240f,224f,92f,p);txt(c,dialName().take(1).ifBlank{"◉"},240f,258f,84f,Color.BLACK,Paint.Align.CENTER);txt(c,dialName().ifBlank{dial},240f,380f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,if(demoCallActive)"שיחה מדומה פעילה" else "מתבצע חיוג מדומה...",240f,415f,20f,green,Paint.Align.CENTER);txt(c,(if(demoSpeaker)"רמקול: פועל" else "רמקול")+"        "+(if(demoMuted)"מושתק" else "השתקה"),240f,519f,19f,Color.WHITE,Paint.Align.CENTER);txt(c,"← רמקול   → השתקה   END סיום",240f,561f,15f,Color.WHITE,Paint.Align.CENTER)}
-                Screen.THREADS->{title(c,"הודעות");if(smsAddresses.isEmpty())txt(c,"אין שרשורים או שאין הרשאת SMS",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,smsAddresses.map{a->a+"   "+(smsItems.firstOrNull{it.address==a}?.body?:"")},cursor)}
+                Screen.THREADS->{title(c,"הודעות");if(smsAddresses.isEmpty())txt(c,if(demoMode)"אין הודעות · לחץ חדש" else "אין שרשורים · לחץ חדש",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,smsAddresses.map{a->a+"   "+(smsItems.firstOrNull{it.address==a}?.body?:"")},cursor)}
+                Screen.RECIPIENT->{title(c,"הודעה חדשה");txt(c,"מספר נמען",440f,165f,23f,green);txt(c,recipientNumber.ifBlank{"הקלד מספר במקשים"},440f,235f,33f,Color.WHITE);txt(c,"OK לכתיבה · מחיקה לתיקון",440f,520f,18f,Color.WHITE)}
                 Screen.CONVERSATION->{title(c,composeNumber);selectedThread.drop(cursor).take(7).forEachIndexed{i,item->val who=if(item.type==2)"אני" else item.address;txt(c,"$who:",430f,120f+i*54f,17f,green);txt(c,item.body.take(38),420f,143f+i*54f,17f,Color.WHITE)}}
                 Screen.CALLLOG->{title(c,"יומן שיחות");if(callRows.isEmpty())txt(c,"אין רשומות או שאין הרשאה",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,callRows,cursor)}
                 Screen.COMPOSE->{title(c,"כתיבת הודעה");txt(c,composeNumber,440f,115f,19f,Color.WHITE);wrap(c,messageText,35f,160f,410f,28f);txt(c,when(editor.mode){MultiTapEngine.Mode.HEBREW->"עברית";MultiTapEngine.Mode.ENGLISH->"English";MultiTapEngine.Mode.NUMBERS->"123"}+"   # החלפה · 0 רווח · * סימנים",440f,524f,17f,green);txt(c,"${messageText.length} תווים",38f,553f,16f,Color.LTGRAY,Paint.Align.LEFT)}
@@ -291,26 +296,26 @@ class MainActivity : Activity() {
             }
             private fun drawGridIcon(c:Canvas,id:Int,x:Float,y:Float,color:Int){
                 c.save();c.translate(x,y)
-                p.style=Paint.Style.FILL;p.color=color
-                c.drawRoundRect(-23f,-23f,23f,23f,8f,8f,p)
-                p.color=Color.WHITE;p.strokeWidth=3f
+                // The reference menu uses small freestanding pictograms over the
+                // wallpaper, with an orange selection ring rather than app tiles.
+                p.style=Paint.Style.FILL;p.color=color;p.strokeWidth=3f
                 fun line(x1:Float,y1:Float,x2:Float,y2:Float){c.drawLine(x1,y1,x2,y2,p)}
                 when(id){
                     0->{c.drawCircle(11f,-10f,4f,p);val path=android.graphics.Path().apply{moveTo(-18f,13f);lineTo(-5f,-4f);lineTo(3f,5f);lineTo(10f,-1f);lineTo(19f,13f);close()};c.drawPath(path,p)}
                     1->{c.drawCircle(0f,-8f,8f,p);c.drawRoundRect(-15f,2f,15f,17f,8f,8f,p)}
                     2->{p.style=Paint.Style.STROKE;p.strokeWidth=7f;c.drawArc(-14f,-15f,14f,15f,40f,110f,false,p);p.style=Paint.Style.FILL;c.drawCircle(-11f,11f,5f,p)}
-                    3->{c.drawRoundRect(-17f,-11f,17f,14f,4f,4f,p);c.drawRect(-10f,-16f,0f,-9f,p);p.color=color;c.drawCircle(0f,1f,9f,p);p.color=Color.WHITE;c.drawCircle(0f,1f,6f,p)}
-                    4->{c.drawRoundRect(-18f,-12f,18f,13f,3f,3f,p);p.color=color;p.style=Paint.Style.STROKE;line(-17f,-10f,0f,2f);line(17f,-10f,0f,2f);p.style=Paint.Style.FILL}
+                    3->{c.drawRoundRect(-17f,-11f,17f,14f,4f,4f,p);c.drawRect(-10f,-16f,0f,-9f,p);p.color=0xFF34304B.toInt();c.drawCircle(0f,1f,9f,p);p.color=color;c.drawCircle(0f,1f,6f,p)}
+                    4->{c.drawRoundRect(-18f,-12f,18f,13f,3f,3f,p);p.color=0xFF34304B.toInt();p.style=Paint.Style.STROKE;line(-17f,-10f,0f,2f);line(17f,-10f,0f,2f);p.style=Paint.Style.FILL}
                     5->{for(k in 0..3)c.drawCircle(-13f+k*9f,(-5+k%2*7).toFloat(),5f,p);p.color=Color.BLACK;c.drawCircle(15f,-7f,2f,p)}
-                    6->{val path=android.graphics.Path().apply{moveTo(0f,-17f);lineTo(17f,0f);lineTo(0f,17f);lineTo(-17f,0f);close()};c.drawPath(path,p);p.color=color;c.drawCircle(0f,0f,6f,p)}
+                    6->{val path=android.graphics.Path().apply{moveTo(0f,-17f);lineTo(17f,0f);lineTo(0f,17f);lineTo(-17f,0f);close()};c.drawPath(path,p);p.color=0xFF34304B.toInt();c.drawCircle(0f,0f,6f,p)}
                     7->{p.style=Paint.Style.STROKE;p.strokeWidth=5f;c.drawCircle(0f,0f,12f,p);for(k in 0..7){val a=k*Math.PI/4;line((14*kotlin.math.cos(a)).toFloat(),(14*kotlin.math.sin(a)).toFloat(),(21*kotlin.math.cos(a)).toFloat(),(21*kotlin.math.sin(a)).toFloat())};p.style=Paint.Style.FILL}
                     8->{val path=android.graphics.Path().apply{moveTo(-9f,-15f);lineTo(16f,0f);lineTo(-9f,15f);close()};c.drawPath(path,p)}
                     9->{p.strokeWidth=4f;line(6f,-15f,6f,9f);line(6f,-15f,18f,-18f);line(18f,-18f,18f,5f);c.drawOval(-7f,6f,7f,15f,p);c.drawOval(6f,3f,20f,12f,p)}
                     10->{p.style=Paint.Style.STROKE;p.strokeWidth=4f;c.drawCircle(0f,1f,16f,p);line(0f,1f,0f,-10f);line(0f,1f,10f,5f);p.style=Paint.Style.FILL}
-                    11->{c.drawRoundRect(-15f,-18f,15f,18f,3f,3f,p);p.color=color;c.drawRect(-10f,-13f,10f,-6f,p);for(a in 0..2)for(b in 0..2)c.drawCircle(-9f+b*9f,0f+a*7f,2.5f,p)}
+                    11->{c.drawRoundRect(-15f,-18f,15f,18f,3f,3f,p);p.color=0xFF34304B.toInt();c.drawRect(-10f,-13f,10f,-6f,p);for(a in 0..2)for(b in 0..2)c.drawCircle(-9f+b*9f,0f+a*7f,2.5f,p)}
                     12->{c.drawRect(-9f,-4f,9f,17f,p);val path=android.graphics.Path().apply{moveTo(-15f,-16f);lineTo(15f,-16f);lineTo(9f,-5f);lineTo(-9f,-5f);close()};c.drawPath(path,p)}
                     13->{c.drawRoundRect(-7f,-17f,7f,6f,7f,7f,p);p.style=Paint.Style.STROKE;p.strokeWidth=3f;c.drawArc(-14f,-10f,14f,13f,0f,180f,false,p);line(0f,13f,0f,20f);p.style=Paint.Style.FILL}
-                    14->{c.drawRoundRect(-17f,-14f,17f,17f,2f,2f,p);p.color=color;c.drawRect(-15f,-5f,15f,-3f,p);p.color=Color.WHITE;line(-8f,-20f,-8f,-9f);line(8f,-20f,8f,-9f);c.drawCircle(0f,6f,4f,p)}
+                    14->{c.drawRoundRect(-17f,-14f,17f,17f,2f,2f,p);p.color=0xFF34304B.toInt();c.drawRect(-15f,-5f,15f,-3f,p);p.color=color;line(-8f,-20f,-8f,-9f);line(8f,-20f,8f,-9f);c.drawCircle(0f,6f,4f,p)}
                     15->{c.drawRoundRect(-19f,-7f,19f,15f,3f,3f,p);c.drawRect(-16f,-13f,0f,-5f,p)}
                     16->{p.style=Paint.Style.STROKE;p.strokeWidth=4f;c.drawCircle(0f,3f,15f,p);line(0f,-12f,0f,-19f);line(0f,3f,8f,-4f);p.style=Paint.Style.FILL}
                 }
@@ -321,7 +326,7 @@ class MainActivity : Activity() {
             private fun title(c:Canvas,s:String){p.color=Color.rgb(48,46,67);c.drawRect(0f,34f,480f,78f,p);txt(c,s,23f,64f,21f,Color.WHITE,Paint.Align.LEFT)}
             private fun drawRows(c:Canvas,items:List<String>,selected:Int){val start=(selected-7).coerceAtLeast(0);items.drop(start).take(8).forEachIndexed{i,s->row(c,i,s,start+i==selected)}}
             private fun row(c:Canvas,i:Int,s:String,on:Boolean){val y=83f+i*59f;if(y>555) return;if(on){p.shader=android.graphics.LinearGradient(0f,y,480f,y,0xFFFFAE59.toInt(),0xFFEF6A3A.toInt(),android.graphics.Shader.TileMode.CLAMP);c.drawRect(0f,y,480f,y+57f,p);p.shader=null};val fg=Color.WHITE;txt(c,s.take(35),449f,y+36f,23f,fg,Paint.Align.RIGHT)}
-            private fun softLeft()=when(screen){Screen.HOME->"אנשי קשר";Screen.CONTACT,Screen.CONVERSATION->"SMS";Screen.COMPOSE->"שלח";else->"בחר"}
+            private fun softLeft()=when(screen){Screen.HOME->"אנשי קשר";Screen.CONTACT,Screen.CONVERSATION->"SMS";Screen.THREADS->"חדש";Screen.COMPOSE->"שלח";else->"בחר"}
             private fun softRight()=if(screen==Screen.HOME)"הודעות" else "חזרה"
             private fun txt(c:Canvas,s:String,x:Float,y:Float,size:Float,color:Int,align:Paint.Align=Paint.Align.RIGHT){p.color=color;p.textSize=size;p.typeface=android.graphics.Typeface.create("sans-serif-condensed",android.graphics.Typeface.NORMAL);p.textAlign=align;c.drawText(s,x,y,p)}
             private fun wrap(c:Canvas,s:String,x:Float,y:Float,w:Float,lh:Float){val words=s.split(" ");var line="";var yy=y;for(word in words){if(p.measureText(line+word)>w){txt(c,line,x+w,yy,18f,Color.WHITE);line="";yy+=lh};line+=word+" "};txt(c,line,x+w,yy,18f,Color.WHITE)}
