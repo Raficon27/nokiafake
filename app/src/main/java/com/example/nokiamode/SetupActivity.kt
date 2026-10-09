@@ -46,13 +46,13 @@ class SetupActivity : Activity() {
             Grant("רשמקול", "גישה למיקרופון", arrayOf(Manifest.permission.RECORD_AUDIO)),
             Grant("לוח שנה", "קריאת אירועים", arrayOf(Manifest.permission.READ_CALENDAR)),
             Grant("אנשי קשר", "שמות ומספרים", arrayOf(Manifest.permission.READ_CONTACTS)),
-            Grant("יומן שיחות", "קריאת שיחות", arrayOf(Manifest.permission.READ_CALL_LOG)),
-            Grant("אפליקציית הודעות", "קבלת SMS אמיתי", kind = "sms"),
-            Grant("קריאת הודעות", "הודעות נכנסות ושרשורים", arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS))
+            Grant("יומן שיחות", "קריאת שיחות", arrayOf(Manifest.permission.READ_CALL_LOG))
         )
         if (Build.VERSION.SDK_INT >= 33)
             common.add(Grant("התראות", "שעון מעורר והודעות", arrayOf(Manifest.permission.POST_NOTIFICATIONS)))
         if (full) common.addAll(listOf(
+            Grant("אפליקציית הודעות", "קבלת SMS אמיתי", kind = "sms"),
+            Grant("קריאת הודעות", "הודעות נכנסות ושרשורים", arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)),
             Grant("חיוג", "שיחות יוצאות", arrayOf(Manifest.permission.CALL_PHONE)),
             Grant("שליחת הודעות", "SMS יוצא אמיתי", arrayOf(Manifest.permission.SEND_SMS))
         ))
@@ -187,7 +187,9 @@ class SetupActivity : Activity() {
             p.color = 0xFF292536.toInt(); c.drawRect(0f, 0f, 480f, 64f, p)
             text(c, "הכנת מצב Nokia", 454f, 43f, 28f, white)
             text(c, "בחר מצב, אשר הרשאות והפעל", 453f, 101f, 21f, white)
-            text(c, "חצים ו־OK או לחיצה · החלקה לגלילת הרשאות", 453f, 133f, 16f,
+            text(c, if (StatusBarControl.available(this@SetupActivity))
+                "חסימת וילון מערכת זמינה במכשיר מנוהל" else
+                "חסימת וילון מלאה דורשת ניהול מכשיר", 453f, 133f, 16f,
                 0xFFC6BFCC.toInt())
             listOf("פעולה מלאה", "מצב דמה").forEachIndexed { i, s ->
                 val x = if (i == 0) 248f else 14f
