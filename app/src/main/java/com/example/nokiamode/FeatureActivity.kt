@@ -27,11 +27,13 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.CalendarContract
 import android.provider.MediaStore
 import android.view.KeyEvent
 import android.view.TextureView
+import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -60,6 +62,11 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     private var texture: TextureView? = null
     private var camera: Camera? = null
     private var cameraIndex = 0
+    private var cameraVideoMode = false
+    private var videoRecorder: MediaRecorder? = null
+    private var videoDescriptor: ParcelFileDescriptor? = null
+    private var videoUri: Uri? = null
+    private var videoSurface: Surface? = null
     private var video: VideoView? = null
     private var audio: MediaPlayer? = null
     private var playingUri: Uri? = null
@@ -82,6 +89,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     private var ninjaV = -10f
     private var ninjaScore = 0
     private var ninjaActive = false
+    private var platformX = 150f
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
         override fun run() {
@@ -99,7 +107,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         feature = intent.getStringExtra("feature") ?: "gallery"
-        window.decorView.systemUiVisibility = 5894 or View.SYSTEM_UI_FLAG_FULLSCREEN
+        ImmersiveUi.apply(this)
         root = FrameLayout(this)
         display = FeatureView(this)
         if (feature == "camera") {
@@ -121,10 +129,14 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         else registerReceiver(exitReceiver, filter)
         handler.post(ticker)
     }
-    override fun onResume() { super.onResume(); window.decorView.systemUiVisibility = 5894 or View.SYSTEM_UI_FLAG_FULLSCREEN
+    override fun onResume() { super.onResume(); ImmersiveUi.apply(this)
         if (feature == "camera" && texture?.isAvailable == true && camera == null) openCamera(texture!!.surfaceTexture!!)
     }
-    override fun onPause() { closeCamera(); if (torch) setTorch(false); super.onPause() }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) window.decorView.post { ImmersiveUi.apply(this) }
+    }
+    override fun onPause() { stopVideo(); closeCamera(); if (torch) setTorch(false); super.onPause() }
     override fun onDestroy() {
         handler.removeCallbacks(ticker); closeCamera(); stopRecording(); audio?.release(); audio = null
         video?.stopPlayback(); pictureCache.evictAll(); unregisterReceiver(exitReceiver); super.onDestroy()
@@ -213,6 +225,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
             }
             "ninja" -> if (s == "4") ninjaX = (ninjaX - 24).coerceAtLeast(20f)
                 else if (s == "6") ninjaX = (ninjaX + 24).coerceAtMost(460f)
+            "camera" -> if (s == "#" && videoRecorder == null) cameraVideoMode = !cameraVideoMode
         }
     }
     private fun select() {
@@ -223,7 +236,9 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                 } else { opened = true; showItem() }
             }
             "music" -> if (items.isNotEmpty()) playAudio(items[cursor].uri)
-            "camera" -> takePhoto()
+            "camera" -> if (cameraVideoMode) {
+                if (videoRecorder == null) startVideo() else stopVideo()
+            } else takePhoto()
             "flashlight" -> setTorch(!torch)
             "recorder" -> if (recorder == null) startRecording() else stopRecording()
             "alarms" -> scheduleAlarm()
@@ -343,9 +358,13 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     private fun stepNinja() {
         ninjaV += 0.55f; ninjaY += ninjaV
         if (ninjaY >= 455f && ninjaV > 0) {
-            if (ninjaX < 70f || ninjaX > 410f) {
+            if (ninjaX < platformX || ninjaX > platformX + 180f) {
                 ninjaActive = false; info = "נפסלת! OK למשחק חדש"; ninjaY = 455f
-            } else { ninjaY = 455f; ninjaV = -12f; ninjaScore++ }
+                ninjaScore = 0; platformX = 150f
+            } else {
+                ninjaY = 455f; ninjaV = -12f; ninjaScore++
+                platformX = ((platformX.toInt() * 7 + ninjaScore * 61) % 270).toFloat() + 15f
+            }
         }
         if (ninjaY < 95f) { ninjaY = 95f; ninjaV = 3f; ninjaScore++ }
     }
@@ -389,6 +408,67 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                 try { cam.startPreview() } catch (_: Exception) {}
             })
         } catch (e: Exception) { warn("הצילום נכשל") }
+    }
+    private fun startVideo() {
+        val cam = camera ?: run { warn("המצלמה אינה זמינה"); return }
+        if (!permitted(Manifest.permission.CAMERA) || !permitted(Manifest.permission.RECORD_AUDIO)) {
+            warn("דרושות הרשאות מצלמה ומיקרופון"); return
+        }
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME,
+                    "Nokia_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4")
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                if (Build.VERSION.SDK_INT >= 29) {
+                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/NokiaMode")
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+            }
+            videoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw IllegalStateException()
+            videoDescriptor = contentResolver.openFileDescriptor(videoUri!!, "w")
+                ?: throw IllegalStateException()
+            cam.unlock()
+            videoSurface = Surface(texture?.surfaceTexture ?: throw IllegalStateException())
+            videoRecorder = MediaRecorder().apply {
+                setCamera(cam)
+                setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
+                setVideoSource(MediaRecorder.VideoSource.CAMERA)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                setOrientationHint(90)
+                setOutputFile(videoDescriptor!!.fileDescriptor)
+                setPreviewDisplay(videoSurface)
+                prepare(); start()
+            }
+            info = "● מקליט וידאו — OK לסיום"
+        } catch (e: Exception) {
+            videoRecorder?.release(); videoRecorder = null
+            videoDescriptor?.close(); videoDescriptor = null
+            videoSurface?.release(); videoSurface = null
+            videoUri?.let { contentResolver.delete(it, null, null) }; videoUri = null
+            closeCamera(); texture?.surfaceTexture?.let { openCamera(it) }
+            warn("הקלטת וידאו אינה זמינה במצלמה זו")
+        }
+    }
+    private fun stopVideo() {
+        val current = videoRecorder ?: return
+        var saved = false
+        try { current.stop(); saved = true }
+        catch (_: Exception) {} finally {
+            current.release(); videoRecorder = null
+            videoDescriptor?.close(); videoDescriptor = null
+            videoSurface?.release(); videoSurface = null
+            videoUri?.let { uri ->
+                if (saved && Build.VERSION.SDK_INT >= 29) contentResolver.update(uri,
+                    ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                if (!saved) contentResolver.delete(uri, null, null)
+            }
+            videoUri = null
+            closeCamera(); texture?.surfaceTexture?.let { openCamera(it) }
+        }
+        if (saved) warn("הסרטון נשמר") else warn("הקלטת הווידאו נכשלה")
     }
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) { openCamera(surface) }
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
@@ -475,7 +555,8 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                 "camera" -> {
                     p.color = orange; c.drawCircle(240f, 573f, 26f, p)
                     p.color = Color.WHITE; c.drawCircle(240f, 573f, 18f, p)
-                    text(c, "OK צילום   ↑ החלפת מצלמה", 452f, 517f, 18f)
+                    text(c, (if (cameraVideoMode) "וידאו" else "תמונה") +
+                        "   # החלפה · OK צילום · ↑ מצלמה", 452f, 517f, 18f)
                 }
                 "flashlight" -> {
                     p.color = if (torch) 0xFFFFD671.toInt() else 0xFF555164.toInt()
@@ -528,7 +609,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                         white, Paint.Align.CENTER)
                 }
                 "ninja" -> {
-                    p.color = orange; c.drawRect(60f, 490f, 420f, 505f, p)
+                    p.color = orange; c.drawRect(platformX, 490f, platformX + 180f, 505f, p)
                     c.drawCircle(ninjaX, ninjaY, 18f, p)
                     text(c, "ניקוד " + ninjaScore, 449f, 111f, 23f)
                     text(c, "חצים או 4/6 · OK התחלה/השהיה", 240f, 540f, 17f,
