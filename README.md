@@ -20,6 +20,7 @@
 
 - **תפקיד SMS:** Android מציג אישור מערכת לבחירת אפליקציית SMS ברירת מחדל. האפליקציה מבקשת את התפקיד בעת פתיחה רק אם אינו מוחזק. לאחר שהמשתמש אישר, אין API ציבורי שמאפשר לאפליקציה לבטל את התפקיד כשנסגרת או לגרום למערכת לשאול שוב בכל הפעלה; רק המשתמש או המערכת יכולים לשנותו. התפקיד משפיע גם מחוץ לזמן שהאפליקציה פתוחה.
 - **מגע:** Activity מתעלמת ממגע בתוך החלון. שכבת־העל מבקשת `SYSTEM_ALERT_WINDOW` ומנסה לבלוע נגיעות כשהאפליקציה פעילה. Android שומר שליטה בחלונות ובמחוות מערכת מסוימות, ולכן אפליקציה רגילה אינה יכולה להבטיח חסימת Touch מוחלטת בכל ממשק או למנוע יציאה/מעבר לאפליקציה אחרת. אם ההרשאה נדחית, רק מסך האפליקציה עצמו מתעלם ממגע.
+- **אישור שכבת־על ב־Android 11:** הכפתור במסך ההכנה פותח את דף הרשאות שכבת־העל של המערכת. ב־Android 11 המערכת מתעלמת מכתובת `package:` ומציגה רשימת אפליקציות; בוחרים בה את **מצב Nokia**, מאשרים וחוזרים לאפליקציה. אין API ציבורי שמדלג על בחירת האפליקציה או מאשר את ההרשאה בשמה. לאחר החזרה המסך מזהה אוטומטית את האישור.
 - **סרגל המצב/ההתראות:** האפליקציה מפעילה Immersive Sticky ומסתירה את סרגל המצב והניווט, כולל ניסיון הסתרה דרך `WindowInsetsController` ב־Android 11 ומעלה. היא מפעילה זאת מחדש בחזרה לאפליקציה. Android עדיין מאפשר להציג סרגלים זמניים באמצעות מחוות קצה; אפליקציה רגילה אינה יכולה לחסום לצמיתות את ה־Notification Shade. לפי תיעוד Android, השבתה קבועה נתמכת רק בפריסת Android Enterprise: DPC שמוגדר כ־Device Owner יכול לקרוא ל־`DevicePolicyManager.setStatusBarDisabled()` ולהשתמש ב־Lock Task. התקנת APK רגילה או הרשאת Overlay אינן מעניקות מעמד זה, ולכן הפרויקט אינו טוען לחסימה מלאה.
 - **תפקיד SMS במעבר למצב דמה:** אם מצב מלא קיבל בעבר את תפקיד ברירת המחדל ל־SMS, Android לא מאפשר לאפליקציה להחזיר אותו אוטומטית לאפליקציה הקודמת. מצב דמה לא יוזם שליחה או חיוג, אך Android עדיין עשוי למסור לאפליקציה הודעות נכנסות בשל התפקיד הקודם. יש לשנות את אפליקציית ברירת המחדל ב־Android אם עוברים לדמה באופן קבוע.
 - **שיחות נכנסות:** הצגת ממשק שיחה משלנו דורשת תפקיד Dialer ברירת מחדל ו־Telecom `InCallService`. הפרויקט אינו מבקש את התפקיד הזה, ולכן Android מטפל בשיחות.
@@ -54,4 +55,5 @@ gradle --no-daemon assembleDebug
 - Immersive mode: https://developer.android.com/develop/ui/views/immersive
 - הנחיות Android לתוכן Immersive ומגבלת הסתרה קבועה במכשיר אישי: https://developer.android.com/design/ui/mobile/guides/layout-and-content/immersive-content
 - `DevicePolicyManager.setStatusBarDisabled`: https://developer.android.com/reference/android/app/admin/DevicePolicyManager#setStatusBarDisabled(android.content.ComponentName,boolean)
+- שינוי בקשת שכבת־על ב־Android 11: https://developer.android.com/about/versions/11/privacy/permissions#system-alert-window
 - Lock Task למכשירים ייעודיים: https://developer.android.com/work/dpc/dedicated-devices/lock-task-mode
