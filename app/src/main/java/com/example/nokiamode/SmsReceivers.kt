@@ -58,6 +58,10 @@ class MmsDeliverReceiver : BroadcastReceiver() {
 class RespondViaMessageService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (ModeStore.get(this) == NokiaMode.DEMO) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         val uri = intent?.data
         val address = uri?.schemeSpecificPart?.substringBefore('?')
         val body = intent?.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
