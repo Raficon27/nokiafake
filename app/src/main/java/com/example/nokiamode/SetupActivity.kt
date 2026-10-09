@@ -31,7 +31,7 @@ class SetupActivity : Activity() {
         if (ModeStore.isConfigured(this) && !intent.getBooleanExtra("change_mode", false)) {
             startActivity(Intent(this, MainActivity::class.java)); finish(); return
         }
-        full = ModeStore.isConfigured(this) && ModeStore.get(this) == NokiaMode.FULL
+        full = ModeStore.get(this) == NokiaMode.FULL
         view = SetupView()
         setContentView(view)
     }
@@ -43,15 +43,17 @@ class SetupActivity : Activity() {
             Grant("גלריה וסרטונים", "קריאת תמונות וסרטונים", mediaPermissions()),
             Grant("מוזיקה", "קריאת קובצי שמע", audioPermission()),
             Grant("רשמקול", "גישה למיקרופון", arrayOf(Manifest.permission.RECORD_AUDIO)),
-            Grant("לוח שנה", "קריאת אירועים", arrayOf(Manifest.permission.READ_CALENDAR))
+            Grant("לוח שנה", "קריאת אירועים", arrayOf(Manifest.permission.READ_CALENDAR)),
+            Grant("אנשי קשר", "שמות ומספרים", arrayOf(Manifest.permission.READ_CONTACTS)),
+            Grant("יומן שיחות", "קריאת שיחות", arrayOf(Manifest.permission.READ_CALL_LOG)),
+            Grant("אפליקציית הודעות", "קבלת SMS אמיתי", kind = "sms"),
+            Grant("קריאת הודעות", "הודעות נכנסות ושרשורים", arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS))
         )
         if (Build.VERSION.SDK_INT >= 33)
             common.add(Grant("התראות", "שעון מעורר והודעות", arrayOf(Manifest.permission.POST_NOTIFICATIONS)))
         if (full) common.addAll(listOf(
-            Grant("אפליקציית הודעות", "בחירת ברירת מחדל של SMS", kind = "sms"),
-            Grant("אנשי קשר", "שמות ומספרים", arrayOf(Manifest.permission.READ_CONTACTS)),
-            Grant("טלפון ויומן", "חיוג והיסטוריית שיחות", arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_CALL_LOG)),
-            Grant("הודעות SMS", "קריאה, קבלה ושליחה", arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS, Manifest.permission.SEND_SMS))
+            Grant("חיוג", "שיחות יוצאות", arrayOf(Manifest.permission.CALL_PHONE)),
+            Grant("שליחת הודעות", "SMS יוצא אמיתי", arrayOf(Manifest.permission.SEND_SMS))
         ))
         return common
     }
@@ -80,6 +82,10 @@ class SetupActivity : Activity() {
                 }
             }
             else -> {
+                if (g.permissions.contains(Manifest.permission.READ_SMS)) {
+                    val sms = grants().first { it.kind == "sms" }
+                    if (!granted(sms)) { activate(sms); return }
+                }
                 val missing = g.permissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
                 if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 31)
             }
