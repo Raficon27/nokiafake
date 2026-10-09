@@ -38,6 +38,10 @@ class MainActivity : Activity() {
     private lateinit var ui: NokiaView
     private var screen = Screen.HOME
     private var previous = Screen.HOME
+    private var composeReturn = Screen.THREADS
+    private var contactsReturn = Screen.MENU
+    private var threadsReturn = Screen.MENU
+    private var dialerReturn = Screen.MENU
     private var cursor = 0
     private var contacts = mutableListOf<Person>()
     private var contactSearch = ""
@@ -142,7 +146,7 @@ class MainActivity : Activity() {
         }
         ui.invalidate(); return true
     }
-    private fun move(n:Int) { when(screen) { Screen.SNAKE -> turnSnake(0,n); Screen.MENU -> cursor=(cursor+n*3).coerceIn(0,menus.lastIndex); Screen.COMPOSE -> editor.commit(); else -> cursor=(cursor+n).coerceIn(0,maxIndex()) } }
+    private fun move(n:Int) { when(screen) { Screen.SNAKE -> turnSnake(0,n); Screen.MENU -> {val next=cursor+n*3;if(next in menus.indices)cursor=next}; Screen.COMPOSE -> editor.commit(); else -> cursor=(cursor+n).coerceIn(0,maxIndex()) } }
     private fun horizontal(n:Int) { when(screen) {
         Screen.SNAKE -> turnSnake(n,0)
         Screen.CALC -> calcInput += if(n<0) "-" else "+"
@@ -156,12 +160,12 @@ class MainActivity : Activity() {
     private fun snakeStep(dx:Int,dy:Int){val head=snakeBody.first();val next=Pair((head.first+dx+20)%20,(head.second+dy+20)%20);if(snakeBody.dropLast(1).contains(next)){snakeBody.clear();snakeBody.addAll(listOf(Pair(5,5),Pair(4,5),Pair(3,5)));snakeScore=0;snakeDirection=Pair(1,0);return};snakeBody.add(0,next);snakeX=next.first;snakeY=next.second;if(next.first==foodX&&next.second==foodY){snakeScore++;foodX=(foodX*7+3)%20;foodY=(foodY*11+5)%20}else snakeBody.removeAt(snakeBody.lastIndex)}
     private fun select() { when(screen) {
         Screen.HOME -> {screen=Screen.MENU;cursor=0}
-        Screen.MENU -> when(cursor){0->{searchEditor.reset();contactSearch="";loadContacts();open(Screen.CONTACTS)};1->open(Screen.DIALER);2->{loadSms();open(Screen.THREADS)};3->launchCamera();4->open(Screen.GALLERY);5->{loadCallLog();open(Screen.CALLLOG)};6->open(Screen.SNAKE);7->open(Screen.VIDEOS);8->open(Screen.CALC);9->open(Screen.ZMANIM);10->open(Screen.SETTINGS)}
+        Screen.MENU -> when(cursor){0->{contactsReturn=Screen.MENU;searchEditor.reset();contactSearch="";loadContacts();open(Screen.CONTACTS)};1->{dialerReturn=Screen.MENU;open(Screen.DIALER)};2->{threadsReturn=Screen.MENU;loadSms();open(Screen.THREADS)};3->launchCamera();4->open(Screen.GALLERY);5->{loadCallLog();open(Screen.CALLLOG)};6->open(Screen.SNAKE);7->open(Screen.VIDEOS);8->open(Screen.CALC);9->open(Screen.ZMANIM);10->open(Screen.SETTINGS)}
         Screen.CONTACTS -> { val list=visibleContacts();if(list.isNotEmpty()){selected=list[cursor.coerceIn(0,list.lastIndex)];open(Screen.CONTACT)} }
-        Screen.CONTACT -> { dial=selected.number;screen=Screen.DIALER }
+        Screen.CONTACT -> { dial=selected.number;dialerReturn=Screen.CONTACT;screen=Screen.DIALER }
         Screen.DIALER -> callOrAnswer()
         Screen.THREADS -> {val address=smsAddresses.getOrNull(cursor);if(address!=null){selectedThread=smsItems.filter{it.address==address}.sortedBy{it.date}.toMutableList();composeNumber=address;open(Screen.CONVERSATION)}}
-        Screen.CONVERSATION -> {editor.reset();messageText="";screen=Screen.COMPOSE}
+        Screen.CONVERSATION -> {editor.reset();messageText="";composeReturn=Screen.CONVERSATION;screen=Screen.COMPOSE}
         Screen.DEMO_CALL -> demoCallActive=true
         Screen.COMPOSE -> sendSms()
         Screen.CALC -> { calcInput=calculate(calcInput) }
@@ -177,15 +181,18 @@ class MainActivity : Activity() {
     private fun back() { when(screen) {
         Screen.HOME -> return
         Screen.CONTACT -> screen=Screen.CONTACTS
+        Screen.CONTACTS -> screen=contactsReturn
+        Screen.CONVERSATION -> screen=Screen.THREADS
+        Screen.THREADS -> screen=threadsReturn
         Screen.HELP -> screen=previous
         Screen.KEYS -> screen=Screen.SETTINGS
         Screen.DEMO_CALL -> { demoCallActive=false;screen=Screen.DIALER }
-        Screen.DIALER -> {dial="";screen=Screen.MENU}
-        Screen.COMPOSE -> {editor.reset();messageText="";screen=Screen.THREADS}
+        Screen.DIALER -> {dial="";screen=dialerReturn}
+        Screen.COMPOSE -> {editor.reset();messageText="";screen=composeReturn}
         else -> screen=Screen.MENU
     };cursor=0;ui.invalidate() }
-    private fun softLeft(){when(screen){Screen.HOME->{searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.CONTACT->{composeNumber=selected.number;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.CONVERSATION->{editor.reset();messageText="";screen=Screen.COMPOSE};Screen.THREADS->{searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.COMPOSE->sendSms();else->select()}}
-    private fun softRight(){if(screen==Screen.HOME){loadSms();screen=Screen.THREADS}else back()}
+    private fun softLeft(){when(screen){Screen.HOME->{contactsReturn=Screen.HOME;searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.CONTACT->{composeNumber=selected.number;composeReturn=Screen.CONTACT;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.CONVERSATION->{composeReturn=Screen.CONVERSATION;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.THREADS->{contactsReturn=Screen.THREADS;searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.COMPOSE->sendSms();else->select()}}
+    private fun softRight(){if(screen==Screen.HOME){threadsReturn=Screen.HOME;loadSms();screen=Screen.THREADS}else back()}
     private fun startTouchShield() {
         if (android.os.Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
             try { startService(Intent(this, TouchShieldService::class.java)) }
@@ -194,7 +201,7 @@ class MainActivity : Activity() {
     }
     private fun callOrAnswer() {
         if (screen == Screen.DEMO_CALL) { demoCallActive=true; return }
-        if (screen == Screen.HOME) { dial="";open(Screen.DIALER);return }
+        if (screen == Screen.HOME) { dial="";dialerReturn=Screen.HOME;open(Screen.DIALER);return }
         if (screen == Screen.CONTACT) dial=selected.number
         if (screen != Screen.DIALER && screen != Screen.CONTACT || dial.isBlank()) return
         if (demoMode) {demoCallActive=false;open(Screen.DEMO_CALL);return}
