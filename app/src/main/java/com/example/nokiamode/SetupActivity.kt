@@ -109,9 +109,9 @@ class SetupActivity : Activity() {
     private fun launch() {
         val missing = grants().firstOrNull { !granted(it) }
         if (missing != null) {
-            Toast.makeText(this, "יש לאשר: ${missing.title}", Toast.LENGTH_LONG).show()
-            focus = grants().indexOf(missing) + 1
-            ensureVisible(); view.invalidate(); return
+            scroll = grants().indexOf(missing).coerceIn(0, (grants().size - 4).coerceAtLeast(0))
+            focus = grants().size + 1
+            view.invalidate(); activate(missing); return
         }
         ModeStore.set(this, if (full) NokiaMode.FULL else NokiaMode.DEMO)
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
@@ -181,6 +181,8 @@ class SetupActivity : Activity() {
             p.color = 0xFF292536.toInt(); c.drawRect(0f, 0f, 480f, 64f, p)
             text(c, "הכנת מצב Nokia", 454f, 43f, 28f, white)
             text(c, "בחר מצב, אשר הרשאות והפעל", 453f, 101f, 21f, white)
+            text(c, "חצים ו־OK או לחיצה · החלקה לגלילת הרשאות", 453f, 133f, 16f,
+                0xFFC6BFCC.toInt())
             listOf("פעולה מלאה", "מצב דמה").forEachIndexed { i, s ->
                 val x = if (i == 0) 248f else 14f
                 p.color = if ((i == 0) == full) orange else 0xFF383345.toInt()
@@ -206,7 +208,8 @@ class SetupActivity : Activity() {
                 446f, 511f, 14f, 0xFFAFA8BA.toInt())
             p.color = if (focus == all.size + 1) 0xFFFFB46F.toInt() else orange
             c.drawCircle(240f, 565f, 49f, p)
-            text(c, "הפעל", 240f, 575f, 25f, Color.BLACK, Paint.Align.CENTER)
+            text(c, if (done == all.size) "הפעל" else "אשר הבא", 240f, 575f,
+                if (done == all.size) 25f else 20f, Color.BLACK, Paint.Align.CENTER)
             val seconds = ModeStore.duration(this@SetupActivity) / 1000
             text(c, "זמן שימוש מצטבר: ${seconds / 3600}ש׳ ${(seconds / 60) % 60}ד׳", 240f, 631f,
                 16f, 0xFFCFC8D5.toInt(), Paint.Align.CENTER)
