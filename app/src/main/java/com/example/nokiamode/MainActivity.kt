@@ -282,13 +282,39 @@ class MainActivity : Activity() {
                 for(crater in craters){p.color=0x45622F60;p.style=Paint.Style.STROKE;p.strokeWidth=6f;c.drawCircle(crater[0],crater[1],crater[2],p);p.color=0x33612C5C;p.style=Paint.Style.FILL;c.drawCircle(crater[0]+5f,crater[1]+5f,crater[2]*0.68f,p)}
             }
             private fun drawGrid(c:Canvas){
-                val icons=listOf("▧","♟","☏","◉","✉","●","◆","⚙","▶","♫","◷","±","✶","◉","▦","▤","◴")
                 val colors=intArrayOf(0xFFFBD54A.toInt(),0xFF27C4E3.toInt(),0xFF33CFB6.toInt(),0xFFEEEAF0.toInt(),0xFF42D3BE.toInt(),0xFFE95B9D.toInt(),0xFF7BB5FE.toInt(),0xFF7EB8EE.toInt(),0xFFE64F9D.toInt(),0xFFFBD54A.toInt(),0xFF69DBE2.toInt(),0xFF4BC4D9.toInt(),0xFFF7E493.toInt(),0xFFE7789D.toInt(),0xFFC4DCF0.toInt(),0xFF8BDC93.toInt(),0xFFF7B675.toInt())
                 for(i in menus.indices){
                     val x=86f+(i%3)*154f;val y=125f+(i/3)*76f
                     if(i==cursor){p.color=0xFFFF633E.toInt();p.style=Paint.Style.STROKE;p.strokeWidth=4f;c.drawCircle(x,y,31f,p);p.style=Paint.Style.FILL}
-                    txt(c,icons[i],x,y+14f,38f,colors[i],Paint.Align.CENTER)
+                    drawGridIcon(c,i,x,y,colors[i])
                 }
+            }
+            private fun drawGridIcon(c:Canvas,id:Int,x:Float,y:Float,color:Int){
+                c.save();c.translate(x,y)
+                p.style=Paint.Style.FILL;p.color=color
+                c.drawRoundRect(-23f,-23f,23f,23f,8f,8f,p)
+                p.color=Color.WHITE;p.strokeWidth=3f
+                fun line(x1:Float,y1:Float,x2:Float,y2:Float){c.drawLine(x1,y1,x2,y2,p)}
+                when(id){
+                    0->{c.drawCircle(11f,-10f,4f,p);val path=android.graphics.Path().apply{moveTo(-18f,13f);lineTo(-5f,-4f);lineTo(3f,5f);lineTo(10f,-1f);lineTo(19f,13f);close()};c.drawPath(path,p)}
+                    1->{c.drawCircle(0f,-8f,8f,p);c.drawRoundRect(-15f,2f,15f,17f,8f,8f,p)}
+                    2->{p.style=Paint.Style.STROKE;p.strokeWidth=7f;c.drawArc(-14f,-15f,14f,15f,40f,110f,false,p);p.style=Paint.Style.FILL;c.drawCircle(-11f,11f,5f,p)}
+                    3->{c.drawRoundRect(-17f,-11f,17f,14f,4f,4f,p);c.drawRect(-10f,-16f,0f,-9f,p);p.color=color;c.drawCircle(0f,1f,9f,p);p.color=Color.WHITE;c.drawCircle(0f,1f,6f,p)}
+                    4->{c.drawRoundRect(-18f,-12f,18f,13f,3f,3f,p);p.color=color;p.style=Paint.Style.STROKE;line(-17f,-10f,0f,2f);line(17f,-10f,0f,2f);p.style=Paint.Style.FILL}
+                    5->{for(k in 0..3)c.drawCircle(-13f+k*9f,(-5+k%2*7).toFloat(),5f,p);p.color=Color.BLACK;c.drawCircle(15f,-7f,2f,p)}
+                    6->{val path=android.graphics.Path().apply{moveTo(0f,-17f);lineTo(17f,0f);lineTo(0f,17f);lineTo(-17f,0f);close()};c.drawPath(path,p);p.color=color;c.drawCircle(0f,0f,6f,p)}
+                    7->{p.style=Paint.Style.STROKE;p.strokeWidth=5f;c.drawCircle(0f,0f,12f,p);for(k in 0..7){val a=k*Math.PI/4;line((14*kotlin.math.cos(a)).toFloat(),(14*kotlin.math.sin(a)).toFloat(),(21*kotlin.math.cos(a)).toFloat(),(21*kotlin.math.sin(a)).toFloat())};p.style=Paint.Style.FILL}
+                    8->{val path=android.graphics.Path().apply{moveTo(-9f,-15f);lineTo(16f,0f);lineTo(-9f,15f);close()};c.drawPath(path,p)}
+                    9->{p.strokeWidth=4f;line(6f,-15f,6f,9f);line(6f,-15f,18f,-18f);line(18f,-18f,18f,5f);c.drawOval(-7f,6f,7f,15f,p);c.drawOval(6f,3f,20f,12f,p)}
+                    10->{p.style=Paint.Style.STROKE;p.strokeWidth=4f;c.drawCircle(0f,1f,16f,p);line(0f,1f,0f,-10f);line(0f,1f,10f,5f);p.style=Paint.Style.FILL}
+                    11->{c.drawRoundRect(-15f,-18f,15f,18f,3f,3f,p);p.color=color;c.drawRect(-10f,-13f,10f,-6f,p);for(a in 0..2)for(b in 0..2)c.drawCircle(-9f+b*9f,0f+a*7f,2.5f,p)}
+                    12->{c.drawRect(-9f,-4f,9f,17f,p);val path=android.graphics.Path().apply{moveTo(-15f,-16f);lineTo(15f,-16f);lineTo(9f,-5f);lineTo(-9f,-5f);close()};c.drawPath(path,p)}
+                    13->{c.drawRoundRect(-7f,-17f,7f,6f,7f,7f,p);p.style=Paint.Style.STROKE;p.strokeWidth=3f;c.drawArc(-14f,-10f,14f,13f,0f,180f,false,p);line(0f,13f,0f,20f);p.style=Paint.Style.FILL}
+                    14->{c.drawRoundRect(-17f,-14f,17f,17f,2f,2f,p);p.color=color;c.drawRect(-15f,-5f,15f,-3f,p);p.color=Color.WHITE;line(-8f,-20f,-8f,-9f);line(8f,-20f,8f,-9f);c.drawCircle(0f,6f,4f,p)}
+                    15->{c.drawRoundRect(-19f,-7f,19f,15f,3f,3f,p);c.drawRect(-16f,-13f,0f,-5f,p)}
+                    16->{p.style=Paint.Style.STROKE;p.strokeWidth=4f;c.drawCircle(0f,3f,15f,p);line(0f,-12f,0f,-19f);line(0f,3f,8f,-4f);p.style=Paint.Style.FILL}
+                }
+                c.restore()
             }
             private fun drawSignal(c:Canvas,x:Float,y:Float){p.color=Color.WHITE;for(i in 0..3)c.drawRect(x+i*6f,y+13f-i*3f,x+4f+i*6f,22f,p)}
             private fun drawBattery(c:Canvas,x:Float,y:Float){p.color=Color.rgb(242,240,216);p.style=Paint.Style.STROKE;p.strokeWidth=1.5f;c.drawRect(x,y,x+20f,y+13f,p);c.drawRect(x+20f,y+4f,x+23f,y+9f,p);p.style=Paint.Style.FILL;p.color=green;c.drawRect(x+2f,y+2f,x+2f+16f*batteryPct.coerceIn(0,100)/100f,y+11f,p)}
