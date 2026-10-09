@@ -56,7 +56,7 @@ class MainActivity : Activity() {
     private var exitReceiverRegistered = false
     private val exitReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == TouchShieldService.ACTION_EXIT) finish()
+            if (intent?.action == TouchShieldService.ACTION_EXIT) leaveMode()
         }
     }
     private var dial = ""
@@ -73,13 +73,14 @@ class MainActivity : Activity() {
     private var batteryPct=0
     private val clockTick=object:Runnable{override fun run(){try{val b=registerReceiver(null,android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));val level=b?.getIntExtra("level",0)?:0;val scale=b?.getIntExtra("scale",100)?:100;batteryPct=if(scale>0)level*100/scale else 0}catch(_:Exception){};if(::ui.isInitialized)ui.invalidate();handler.postDelayed(this,15000)}}
     private val snakeTick=object:Runnable{override fun run(){if(screen==Screen.SNAKE){snakeStep(snakeDirection.first,snakeDirection.second);ui.invalidate();handler.postDelayed(this,520)}}}
-    private val menus = listOf("אנשי קשר", "חייגן", "הודעות", "מצלמה", "תמונות", "היסטוריית שיחות", "Snake", "סרטונים", "מחשבון", "זמני היום", "הגדרות")
+    private val menus = listOf("גלריה", "אנשי קשר", "יומן שיחות", "מצלמה", "הודעות", "סנייק", "נינג׳ה אפ", "הגדרות", "סרטונים", "מוזיקה", "שעון מעורר", "מחשבון", "פנס", "רשמקול", "לוח שנה", "הקבצים שלי", "מונים")
 
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
         if (!ModeStore.isConfigured(this)) {
             startActivity(Intent(this, SetupActivity::class.java)); finish(); return
         }
         demoMode = ModeStore.get(this) == NokiaMode.DEMO
+        ModeStore.start(this)
         applyImmersiveMode()
         ui = NokiaView(); setContentView(ui); handler.post(clockTick); startTouchShield()
         val filter = IntentFilter(TouchShieldService.ACTION_EXIT)
@@ -122,7 +123,7 @@ class MainActivity : Activity() {
         if (event.repeatCount > 0 && key.action !in listOf(KeyAction.UP, KeyAction.DOWN, KeyAction.LEFT, KeyAction.RIGHT)) return true
         if (screen == Screen.DIALER && key.action == KeyAction.DIGIT) {
             dial += key.symbol
-            if (dial == "1234") { finish(); return true }
+            if (dial == "1234") { leaveMode(); return true }
             ui.invalidate(); return true
         }
         when (key.action) {
@@ -146,7 +147,7 @@ class MainActivity : Activity() {
         }
         ui.invalidate(); return true
     }
-    private fun move(n:Int) { when(screen) { Screen.SNAKE -> turnSnake(0,n); Screen.MENU -> {val next=cursor+n*3;if(next in menus.indices)cursor=next}; Screen.COMPOSE -> editor.commit(); else -> cursor=(cursor+n).coerceIn(0,maxIndex()) } }
+    private fun move(n:Int) { when(screen) { Screen.SNAKE -> turnSnake(0,n); Screen.MENU -> {val next=cursor+n*3;if(next in menus.indices)cursor=next}; Screen.CALC -> calcInput += if(n<0) "*" else "/"; Screen.COMPOSE -> editor.commit(); else -> cursor=(cursor+n).coerceIn(0,maxIndex()) } }
     private fun horizontal(n:Int) { when(screen) {
         Screen.SNAKE -> turnSnake(n,0)
         Screen.CALC -> calcInput += if(n<0) "-" else "+"
@@ -160,7 +161,15 @@ class MainActivity : Activity() {
     private fun snakeStep(dx:Int,dy:Int){val head=snakeBody.first();val next=Pair((head.first+dx+20)%20,(head.second+dy+20)%20);if(snakeBody.dropLast(1).contains(next)){snakeBody.clear();snakeBody.addAll(listOf(Pair(5,5),Pair(4,5),Pair(3,5)));snakeScore=0;snakeDirection=Pair(1,0);return};snakeBody.add(0,next);snakeX=next.first;snakeY=next.second;if(next.first==foodX&&next.second==foodY){snakeScore++;foodX=(foodX*7+3)%20;foodY=(foodY*11+5)%20}else snakeBody.removeAt(snakeBody.lastIndex)}
     private fun select() { when(screen) {
         Screen.HOME -> {screen=Screen.MENU;cursor=0}
-        Screen.MENU -> when(cursor){0->{contactsReturn=Screen.MENU;searchEditor.reset();contactSearch="";loadContacts();open(Screen.CONTACTS)};1->{dialerReturn=Screen.MENU;open(Screen.DIALER)};2->{threadsReturn=Screen.MENU;loadSms();open(Screen.THREADS)};3->launchCamera();4->open(Screen.GALLERY);5->{loadCallLog();open(Screen.CALLLOG)};6->open(Screen.SNAKE);7->open(Screen.VIDEOS);8->open(Screen.CALC);9->open(Screen.ZMANIM);10->open(Screen.SETTINGS)}
+        Screen.MENU -> when(cursor){
+            0->feature("gallery");1->{contactsReturn=Screen.MENU;searchEditor.reset();contactSearch="";loadContacts();open(Screen.CONTACTS)}
+            2->{loadCallLog();open(Screen.CALLLOG)};3->feature("camera")
+            4->{threadsReturn=Screen.MENU;loadSms();open(Screen.THREADS)};5->open(Screen.SNAKE)
+            6->feature("ninja");7->open(Screen.SETTINGS);8->feature("videos")
+            9->feature("music");10->feature("alarms");11->open(Screen.CALC)
+            12->feature("flashlight");13->feature("recorder");14->feature("calendar")
+            15->feature("files");16->feature("counters")
+        }
         Screen.CONTACTS -> { val list=visibleContacts();if(list.isNotEmpty()){selected=list[cursor.coerceIn(0,list.lastIndex)];open(Screen.CONTACT)} }
         Screen.CONTACT -> { dial=selected.number;dialerReturn=Screen.CONTACT;screen=Screen.DIALER }
         Screen.DIALER -> callOrAnswer()
@@ -170,7 +179,7 @@ class MainActivity : Activity() {
         Screen.COMPOSE -> sendSms()
         Screen.CALC -> { calcInput=calculate(calcInput) }
         Screen.SETTINGS -> when(cursor) {
-            1 -> { stopService(Intent(this,TouchShieldService::class.java));startActivity(Intent(this,SetupActivity::class.java).putExtra("change_mode",true));finish() }
+            1 -> { ModeStore.stop(this);stopService(Intent(this,TouchShieldService::class.java));startActivity(Intent(this,SetupActivity::class.java).putExtra("change_mode",true));finish() }
             2 -> open(Screen.KEYS)
             3 -> screen=Screen.HOME
             else -> Unit
@@ -178,6 +187,8 @@ class MainActivity : Activity() {
         else -> {}
     } }
     private fun open(s:Screen, text:String?=null) { previous=screen;screen=s;cursor=0; if(text!=null){notice=text;screen=Screen.HELP};if(screen==Screen.SNAKE){snakeBody.clear();snakeBody.addAll(listOf(Pair(5,5),Pair(4,5),Pair(3,5)));snakeScore=0;snakeDirection=Pair(1,0);handler.removeCallbacks(snakeTick);handler.postDelayed(snakeTick,500)}else handler.removeCallbacks(snakeTick) }
+    private fun feature(name:String) { startActivity(Intent(this, FeatureActivity::class.java).putExtra("feature",name)) }
+    private fun leaveMode() { ModeStore.stop(this);finish() }
     private fun back() { when(screen) {
         Screen.HOME -> return
         Screen.CONTACT -> screen=Screen.CONTACTS
@@ -240,7 +251,7 @@ class MainActivity : Activity() {
         } catch(_:Exception){input}
     }
     private fun applyOp(op:Char,a:Double,b:Double)=when(op){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b }
-    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);stopService(Intent(this,TouchShieldService::class.java));super.onDestroy()}
+    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);stopService(Intent(this,TouchShieldService::class.java));super.onDestroy()}
     private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(255,151,59);private val bg=Color.rgb(16,14,29);private var fallbackTaps=0;private var lastTap=0L
         override fun onTouchEvent(event:android.view.MotionEvent):Boolean{
             if(event.action==android.view.MotionEvent.ACTION_UP){
@@ -248,12 +259,12 @@ class MainActivity : Activity() {
                 val corner=event.x<width*0.18f&&event.y<height*0.14f
                 fallbackTaps=if(corner){if(now-lastTap<1500)fallbackTaps+1 else 1}else 0
                 lastTap=now
-                if(fallbackTaps>=10)finish()
+                if(fallbackTaps>=10)leaveMode()
             }
             return true
         }
-        override fun onDraw(c:Canvas){super.onDraw(c);val sx=width/480f;val sy=height/640f;c.save();c.scale(sx,sy);p.shader=android.graphics.LinearGradient(0f,0f,0f,640f,Color.rgb(55,52,74),bg,android.graphics.Shader.TileMode.CLAMP);c.drawRect(0f,0f,480f,640f,p);p.shader=null;p.color=Color.rgb(49,48,69);c.drawRect(0f,0f,480f,34f,p);txt(c,if(demoMode)"דמה" else "NOKIA",18f,23f,15f,Color.WHITE,Paint.Align.LEFT);drawSignal(c,347f,9f);drawBattery(c,379f,9f);txt(c,"$batteryPct%",423f,23f,13f,Color.WHITE);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),462f,23f,15f,Color.WHITE,Paint.Align.RIGHT)
-            when(screen){Screen.HOME->{drawMoon(c);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),240f,172f,70f,Color.WHITE,Paint.Align.CENTER);txt(c,SimpleDateFormat("dd.MM.yyyy  EEEE",Locale("he","IL")).format(Date()),240f,211f,22f,Color.WHITE,Paint.Align.CENTER);txt(c,"◧  019",30f,277f,19f,Color.WHITE,Paint.Align.LEFT);txt(c,if(demoMode)"מצב דמה" else "SIM 1",30f,308f,16f,Color.WHITE,Paint.Align.LEFT)}
+        override fun onDraw(c:Canvas){super.onDraw(c);val sx=width/480f;val sy=height/640f;c.save();c.scale(sx,sy);p.shader=android.graphics.LinearGradient(0f,0f,0f,640f,Color.rgb(55,52,74),bg,android.graphics.Shader.TileMode.CLAMP);c.drawRect(0f,0f,480f,640f,p);p.shader=null;p.color=Color.rgb(49,48,69);c.drawRect(0f,0f,480f,34f,p);txt(c,"NOKIA",18f,23f,15f,Color.WHITE,Paint.Align.LEFT);drawSignal(c,347f,9f);drawBattery(c,379f,9f);txt(c,"$batteryPct%",423f,23f,13f,Color.WHITE);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),462f,23f,15f,Color.WHITE,Paint.Align.RIGHT)
+            when(screen){Screen.HOME->{drawMoon(c);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),240f,172f,70f,Color.WHITE,Paint.Align.CENTER);txt(c,SimpleDateFormat("dd.MM.yyyy  EEEE",Locale("he","IL")).format(Date()),240f,211f,22f,Color.WHITE,Paint.Align.CENTER);txt(c,"◧  019",30f,277f,19f,Color.WHITE,Paint.Align.LEFT);txt(c,"SIM 1",30f,308f,16f,Color.WHITE,Paint.Align.LEFT)}
                 Screen.MENU->{drawMoon(c);title(c,menus[cursor]);drawGrid(c)}
                 Screen.CONTACTS->{title(c,if(contactSearch.isBlank())"אנשי קשר" else "חיפוש: $contactSearch");val list=visibleContacts().map{it.name+"   "+it.number};if(list.isEmpty())txt(c,"אין התאמות",240f,300f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,list,cursor)}
                 Screen.CONTACT->{title(c,selected.name);txt(c,selected.number,240f,260f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,"OK: חייג   CALL: שיחה",240f,500f,17f,green,Paint.Align.CENTER)}
@@ -264,7 +275,7 @@ class MainActivity : Activity() {
                 Screen.CALLLOG->{title(c,"יומן שיחות");if(callRows.isEmpty())txt(c,"אין רשומות או שאין הרשאה",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,callRows,cursor)}
                 Screen.COMPOSE->{title(c,"כתיבת הודעה");txt(c,composeNumber,440f,115f,19f,Color.WHITE);wrap(c,messageText,35f,160f,410f,28f);txt(c,when(editor.mode){MultiTapEngine.Mode.HEBREW->"עברית";MultiTapEngine.Mode.ENGLISH->"English";MultiTapEngine.Mode.NUMBERS->"123"}+"   # החלפה · 0 רווח · * סימנים",440f,524f,17f,green);txt(c,"${messageText.length} תווים",38f,553f,16f,Color.LTGRAY,Paint.Align.LEFT)}
                 Screen.GALLERY,Screen.VIDEOS->{title(c,if(screen==Screen.GALLERY)"תמונות" else "סרטונים");txt(c,"פתיחה דרך גלריית Android",240f,280f,20f,Color.WHITE,Paint.Align.CENTER)}
-                Screen.CALC->{title(c,"מחשבון");txt(c,calcInput,240f,260f,34f,Color.WHITE,Paint.Align.CENTER);txt(c,"ספרות להקלדה · OK לחישוב",240f,480f,17f,green,Paint.Align.CENTER)}
+                Screen.CALC->{title(c,"מחשבון");txt(c,calcInput.ifBlank{"0"},450f,250f,47f,Color.WHITE);p.color=0xFFBD422F.toInt();c.drawRect(44f,318f,436f,490f,p);txt(c,"+",290f,376f,52f,Color.WHITE,Paint.Align.CENTER);txt(c,"−",190f,428f,49f,Color.WHITE,Paint.Align.CENTER);txt(c,"÷",190f,376f,49f,Color.WHITE,Paint.Align.CENTER);txt(c,"×",290f,428f,49f,Color.WHITE,Paint.Align.CENTER);txt(c,"חצים: פעולות   * כפל   # חילוק   OK =",240f,539f,16f,Color.WHITE,Paint.Align.CENTER)}
                 Screen.SNAKE->{title(c,"Snake  ·  $snakeScore");for(y in 0..19)for(x in 0..19){p.color=if(snakeBody.contains(Pair(x,y)))green else if(x==foodX&&y==foodY)Color.RED else Color.DKGRAY;c.drawRect(35+x*20f,120+y*18f,50+x*20f,133+y*18f,p)};txt(c,"חצים או 2/4/6/8",240f,525f,16f,Color.WHITE,Paint.Align.CENTER)}
                 Screen.ZMANIM->{title(c,"זמני היום");listOf("עלות השחר","טלית ותפילין","הנץ החמה","סוף זמן שמע","חצות היום","מנחה גדולה","מנחה קטנה","פלג המנחה","שקיעה","צאת הכוכבים").forEachIndexed{i,s->row(c,i,"$s       —",i==cursor)};txt(c,"הזמנים דורשים מיקום והגדרות הלכתיות",240f,535f,14f,Color.GRAY,Paint.Align.CENTER)}
                 Screen.SETTINGS->{title(c,"הגדרות");listOf("מצב: "+(if(demoMode)"דמה" else "פעולה מלאה"),"החלף מצב","בדיקת מקשים","מסך הבית").forEachIndexed{i,s->row(c,i,s,i==cursor)}}
@@ -278,12 +289,12 @@ class MainActivity : Activity() {
                 for(crater in craters){p.color=0x45622F60;p.style=Paint.Style.STROKE;p.strokeWidth=6f;c.drawCircle(crater[0],crater[1],crater[2],p);p.color=0x33612C5C;p.style=Paint.Style.FILL;c.drawCircle(crater[0]+5f,crater[1]+5f,crater[2]*0.68f,p)}
             }
             private fun drawGrid(c:Canvas){
-                val icons=listOf("▣","☎","✉","◉","▧","☏","●","▶","±","☼","⚙")
-                val colors=intArrayOf(0xFF27C4E3.toInt(),0xFF42D3BE.toInt(),0xFF33CFB6.toInt(),0xFFEEEAF0.toInt(),0xFFFBD54A.toInt(),0xFF33C4DF.toInt(),0xFFE95B9D.toInt(),0xFFE64F9D.toInt(),0xFF4BC4D9.toInt(),0xFFF7E493.toInt(),0xFF7EB8EE.toInt())
+                val icons=listOf("▧","♟","☏","◉","✉","●","◆","⚙","▶","♫","◷","±","✶","◉","▦","▤","◴")
+                val colors=intArrayOf(0xFFFBD54A.toInt(),0xFF27C4E3.toInt(),0xFF33CFB6.toInt(),0xFFEEEAF0.toInt(),0xFF42D3BE.toInt(),0xFFE95B9D.toInt(),0xFF7BB5FE.toInt(),0xFF7EB8EE.toInt(),0xFFE64F9D.toInt(),0xFFFBD54A.toInt(),0xFF69DBE2.toInt(),0xFF4BC4D9.toInt(),0xFFF7E493.toInt(),0xFFE7789D.toInt(),0xFFC4DCF0.toInt(),0xFF8BDC93.toInt(),0xFFF7B675.toInt())
                 for(i in menus.indices){
-                    val x=86f+(i%3)*154f;val y=145f+(i/3)*104f
-                    if(i==cursor){p.color=0xFFFF633E.toInt();p.style=Paint.Style.STROKE;p.strokeWidth=5f;c.drawCircle(x,y,38f,p);p.style=Paint.Style.FILL}
-                    txt(c,icons[i],x,y+18f,48f,colors[i],Paint.Align.CENTER)
+                    val x=86f+(i%3)*154f;val y=125f+(i/3)*76f
+                    if(i==cursor){p.color=0xFFFF633E.toInt();p.style=Paint.Style.STROKE;p.strokeWidth=4f;c.drawCircle(x,y,31f,p);p.style=Paint.Style.FILL}
+                    txt(c,icons[i],x,y+14f,38f,colors[i],Paint.Align.CENTER)
                 }
             }
             private fun drawSignal(c:Canvas,x:Float,y:Float){p.color=Color.WHITE;for(i in 0..3)c.drawRect(x+i*6f,y+13f-i*3f,x+4f+i*6f,22f,p)}
