@@ -187,9 +187,7 @@ class SetupActivity : Activity() {
             p.color = 0xFF292536.toInt(); c.drawRect(0f, 0f, 480f, 64f, p)
             text(c, "הכנת מצב Nokia", 454f, 43f, 28f, white)
             text(c, "בחר מצב, אשר הרשאות והפעל", 453f, 101f, 21f, white)
-            text(c, if (StatusBarControl.available(this@SetupActivity))
-                "חסימת וילון מערכת זמינה במכשיר מנוהל" else
-                "חסימת וילון מלאה דורשת ניהול מכשיר", 453f, 133f, 16f,
+            text(c, "חצים ו־OK או לחיצה · החלקה לגלילת הרשאות", 453f, 133f, 16f,
                 0xFFC6BFCC.toInt())
             listOf("פעולה מלאה", "מצב דמה").forEachIndexed { i, s ->
                 val x = if (i == 0) 248f else 14f
