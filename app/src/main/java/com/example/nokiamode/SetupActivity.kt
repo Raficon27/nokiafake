@@ -107,15 +107,20 @@ class SetupActivity : Activity() {
             Uri.parse("package:$packageName")))
     }
     private fun launch() {
-        val missing = grants().firstOrNull { !granted(it) }
-        if (missing != null) {
-            scroll = grants().indexOf(missing).coerceIn(0, (grants().size - 4).coerceAtLeast(0))
-            focus = grants().size + 1
-            view.invalidate(); activate(missing); return
+        val overlay = grants().first { it.kind == "overlay" }
+        if (!granted(overlay)) {
+            activate(overlay); return
         }
+        if (grants().any { !granted(it) }) Toast.makeText(this,
+            "הפונקציות שלא אושרו יופיעו כלא זמינות", Toast.LENGTH_LONG).show()
         ModeStore.set(this, if (full) NokiaMode.FULL else NokiaMode.DEMO)
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
         finish()
+    }
+    private fun requestNext() {
+        val missing = grants().firstOrNull { !granted(it) } ?: return
+        scroll = grants().indexOf(missing).coerceIn(0, (grants().size - 4).coerceAtLeast(0))
+        activate(missing); view.invalidate()
     }
     private fun choose() {
         when {
@@ -138,7 +143,8 @@ class SetupActivity : Activity() {
             KeyAction.UP -> focus = (focus - 1).coerceAtLeast(0)
             KeyAction.DOWN -> focus = (focus + 1).coerceAtMost(grants().size + 1)
             KeyAction.LEFT, KeyAction.RIGHT -> if (focus == 0) { full = !full; scroll = 0 }
-            KeyAction.OK, KeyAction.SOFT_LEFT, KeyAction.CALL -> choose()
+            KeyAction.OK -> choose()
+            KeyAction.SOFT_LEFT, KeyAction.CALL -> requestNext()
             KeyAction.SOFT_RIGHT, KeyAction.END -> finish()
             else -> return super.dispatchKeyEvent(event)
         }
@@ -205,11 +211,12 @@ class SetupActivity : Activity() {
                     if (granted(g)) 0xFF84DDB6.toInt() else orange, Paint.Align.CENTER)
             }
             if (all.size > 4) text(c, "${scroll + 1}–${(scroll + 4).coerceAtMost(all.size)} / ${all.size}",
-                446f, 511f, 14f, 0xFFAFA8BA.toInt())
+                446f, 509f, 14f, 0xFFAFA8BA.toInt())
+            text(c, if (done < all.size) "אשר הרשאה הבאה  ◀" else "כל ההרשאות אושרו",
+                240f, 522f, 16f, 0xFFE4C8A7.toInt(), Paint.Align.CENTER)
             p.color = if (focus == all.size + 1) 0xFFFFB46F.toInt() else orange
-            c.drawCircle(240f, 565f, 49f, p)
-            text(c, if (done == all.size) "הפעל" else "אשר הבא", 240f, 575f,
-                if (done == all.size) 25f else 20f, Color.BLACK, Paint.Align.CENTER)
+            c.drawCircle(240f, 570f, 39f, p)
+            text(c, "הפעל", 240f, 579f, 24f, Color.BLACK, Paint.Align.CENTER)
             val seconds = ModeStore.duration(this@SetupActivity) / 1000
             text(c, "זמן שימוש מצטבר: ${seconds / 3600}ש׳ ${(seconds / 60) % 60}ד׳", 240f, 631f,
                 16f, 0xFFCFC8D5.toInt(), Paint.Align.CENTER)
@@ -226,11 +233,12 @@ class SetupActivity : Activity() {
             }
             when {
                 y in 153f..225f -> { full = x >= 240f; scroll = 0; focus = 0 }
-                y in 280f..505f -> {
+                y in 280f..500f -> {
                     val idx = scroll + ((y - 280f) / 55f).toInt()
                     if (idx in grants().indices) { focus = idx + 1; activate(grants()[idx]) }
                 }
-                y in 515f..615f && x in 175f..305f -> { focus = grants().size + 1; launch() }
+                y in 500f..530f -> requestNext()
+                y in 531f..612f && x in 196f..284f -> { focus = grants().size + 1; launch() }
             }
             invalidate(); return true
         }
