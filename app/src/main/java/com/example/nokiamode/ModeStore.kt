@@ -7,11 +7,12 @@ internal enum class NokiaMode { FULL, DEMO }
 internal object ModeStore {
     private const val PREFS = "nokia_mode_setup"
     private const val MODE = "mode"
+    private const val SETUP_VERSION = "setup_version"
     private const val STARTED = "started"
     private const val TOTAL = "total"
 
     fun isConfigured(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains(MODE)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(SETUP_VERSION, 0) >= 2
 
     fun get(context: Context): NokiaMode =
         if (context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(MODE, "DEMO") == "FULL")
@@ -19,7 +20,7 @@ internal object ModeStore {
 
     fun set(context: Context, mode: NokiaMode) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(MODE, mode.name).apply()
+            .edit().putString(MODE, mode.name).putInt(SETUP_VERSION, 2).apply()
     }
 
     fun start(context: Context) {
