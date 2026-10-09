@@ -53,6 +53,8 @@ class MainActivity : Activity() {
     private val searchEditor = MultiTapEngine()
     private var demoMode = false
     private var demoCallActive = false
+    private var demoSpeaker = false
+    private var demoMuted = false
     private var lastPhysicalKey = ""
     private var exitReceiverRegistered = false
     private val exitReceiver = object : BroadcastReceiver() {
@@ -139,6 +141,7 @@ class MainActivity : Activity() {
     private fun move(n:Int) { when(screen) { Screen.SNAKE -> turnSnake(0,n); Screen.MENU -> {val next=cursor+n*3;if(next in menus.indices)cursor=next}; Screen.CALC -> calcInput += if(n<0) "*" else "/"; Screen.COMPOSE -> editor.commit(); else -> cursor=(cursor+n).coerceIn(0,maxIndex()) } }
     private fun horizontal(n:Int) { when(screen) {
         Screen.SNAKE -> turnSnake(n,0)
+        Screen.DEMO_CALL -> if(n<0)demoSpeaker=!demoSpeaker else demoMuted=!demoMuted
         Screen.CALC -> calcInput += if(n<0) "-" else "+"
         Screen.COMPOSE -> editor.move(n)
         Screen.MENU -> { val next=cursor+n; if(next in menus.indices && next/3==cursor/3)cursor=next }
@@ -201,7 +204,7 @@ class MainActivity : Activity() {
     }
     private fun callOrAnswer() {
         if (screen == Screen.DEMO_CALL) { demoCallActive=true; return }
-        if (screen == Screen.HOME) { dial="";dialerReturn=Screen.HOME;open(Screen.DIALER);return }
+        if (screen == Screen.HOME) { dial="";dialerReturn=Screen.HOME;if(contacts.isEmpty())loadContacts();open(Screen.DIALER);return }
         if (screen == Screen.CONTACT) dial=selected.number
         if (screen != Screen.DIALER && screen != Screen.CONTACT || dial.isBlank()) return
         if (demoMode) {demoCallActive=false;open(Screen.DEMO_CALL);return}
@@ -210,6 +213,7 @@ class MainActivity : Activity() {
         catch(e:Exception){toast("לא ניתן לבצע שיחה במכשיר") }
     }
     private fun visibleContacts()=if(contactSearch.isBlank())contacts else contacts.filter{it.number.contains(contactSearch)||it.name.contains(contactSearch,true)}
+    private fun dialName():String {val digits=dial.filter{it.isDigit()};if(digits.length<3)return "";return contacts.firstOrNull{person->person.number.filter{it.isDigit()}==digits}?.name.orEmpty()}
     private fun loadContacts() { if(checkSelfPermission(Manifest.permission.READ_CONTACTS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת אנשי קשר");return}; try { contacts.clear(); val c=contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,ContactsContract.CommonDataKinds.Phone.NUMBER),null,null,ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME+" COLLATE LOCALIZED ASC"); c?.use { while(it.moveToNext()) contacts.add(Person(it.getString(0)?:"ללא שם",it.getString(1)?:"")) };ui.invalidate() }catch(_:Exception){toast("לא ניתן לקרוא אנשי קשר")} }
     private fun loadSms(){smsItems.clear();smsAddresses.clear();if(checkSelfPermission(Manifest.permission.READ_SMS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת הודעות");return};try{contentResolver.query(Uri.parse("content://sms"),arrayOf("address","body","date","type"),null,null,"date DESC")?.use{c->while(c.moveToNext()){val address=c.getString(0)?:"";smsItems.add(SmsItem(address,c.getString(1)?:"",c.getLong(2),c.getInt(3)))}};if(demoMode)smsItems.addAll(demoOutbox);smsItems.sortByDescending{it.date};smsAddresses=smsItems.map{it.address}.filter{it.isNotBlank()}.distinct().toMutableList()}catch(_:Exception){toast("לא ניתן לקרוא הודעות")}}
     private var callRows=mutableListOf<String>()
@@ -257,8 +261,8 @@ class MainActivity : Activity() {
                 Screen.MENU->{drawMoon(c);title(c,menus[cursor]);drawGrid(c)}
                 Screen.CONTACTS->{title(c,if(contactSearch.isBlank())"אנשי קשר" else "חיפוש: $contactSearch");val list=visibleContacts().map{it.name+"   "+it.number};if(list.isEmpty())txt(c,"אין התאמות",240f,300f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,list,cursor)}
                 Screen.CONTACT->{title(c,selected.name);txt(c,selected.number,240f,260f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,"OK: חייג   CALL: שיחה",240f,500f,17f,green,Paint.Align.CENTER)}
-                Screen.DIALER->{title(c,"חייגן");txt(c,dial.ifBlank{"הקלד מספר"},240f,290f,38f,Color.WHITE,Paint.Align.CENTER);if(demoMode)txt(c,"שיחות במצב דמה",240f,390f,18f,green,Paint.Align.CENTER)}
-                Screen.DEMO_CALL->{title(c,"שיחה מדומה");txt(c,dial,240f,250f,32f,Color.WHITE,Paint.Align.CENTER);txt(c,if(demoCallActive)"שיחה מדומה פעילה" else "מתבצע חיוג מדומה...",240f,325f,23f,green,Paint.Align.CENTER);txt(c,"END לסיום",240f,475f,18f,Color.WHITE,Paint.Align.CENTER)}
+                Screen.DIALER->{title(c,"חייגן");txt(c,dial.ifBlank{"הקלד מספר"},240f,257f,40f,Color.WHITE,Paint.Align.CENTER);val name=dialName();if(name.isNotEmpty())txt(c,name,240f,318f,24f,green,Paint.Align.CENTER);txt(c,"CALL לחיוג · מחיקה לתיקון",240f,480f,19f,Color.WHITE,Paint.Align.CENTER)}
+                Screen.DEMO_CALL->{title(c,"שיחה מדומה");p.color=0xFFB5C8DA.toInt();c.drawCircle(240f,224f,92f,p);txt(c,dialName().take(1).ifBlank{"◉"},240f,258f,84f,Color.BLACK,Paint.Align.CENTER);txt(c,dialName().ifBlank{dial},240f,380f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,if(demoCallActive)"שיחה מדומה פעילה" else "מתבצע חיוג מדומה...",240f,415f,20f,green,Paint.Align.CENTER);txt(c,(if(demoSpeaker)"רמקול: פועל" else "רמקול")+"        "+(if(demoMuted)"מושתק" else "השתקה"),240f,519f,19f,Color.WHITE,Paint.Align.CENTER);txt(c,"← רמקול   → השתקה   END סיום",240f,561f,15f,Color.WHITE,Paint.Align.CENTER)}
                 Screen.THREADS->{title(c,"הודעות");if(smsAddresses.isEmpty())txt(c,"אין שרשורים או שאין הרשאת SMS",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,smsAddresses.map{a->a+"   "+(smsItems.firstOrNull{it.address==a}?.body?:"")},cursor)}
                 Screen.CONVERSATION->{title(c,composeNumber);selectedThread.drop(cursor).take(7).forEachIndexed{i,item->val who=if(item.type==2)"אני" else item.address;txt(c,"$who:",430f,120f+i*54f,17f,green);txt(c,item.body.take(38),420f,143f+i*54f,17f,Color.WHITE)}}
                 Screen.CALLLOG->{title(c,"יומן שיחות");if(callRows.isEmpty())txt(c,"אין רשומות או שאין הרשאה",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,callRows,cursor)}
