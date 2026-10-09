@@ -4,6 +4,9 @@ package com.example.nokiamode
 internal class CornerExitDetector {
     private var count = 0
     private var lastTap = 0L
+    val progress: Int get() = count
+
+    fun reset() { count = 0; lastTap = 0L }
 
     fun onDown(x: Float, y: Float, width: Float, height: Float, time: Long): Boolean {
         // The target extends below the system gesture edge. It remains usable when

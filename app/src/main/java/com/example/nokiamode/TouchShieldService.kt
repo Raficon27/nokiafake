@@ -13,14 +13,18 @@ import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
+import android.widget.FrameLayout
+import android.widget.TextView
 
 /** Touch exploration filters edge gestures before dispatch; the trusted window consumes hover. */
 class TouchShieldService : AccessibilityService() {
     companion object {
         const val ACTION_EXIT = "com.example.nokiamode.EXIT_BY_CORNER"
+        private const val CORNER_DESCRIPTION = "אזור יציאה ממצב Nokia"
         private var connected: TouchShieldService? = null
 
         fun isReady(context: Context): Boolean {
@@ -43,8 +47,8 @@ class TouchShieldService : AccessibilityService() {
     private val cornerExit = CornerExitDetector()
     private var manager: WindowManager? = null
     private var shield: View? = null
-    private var hoverX = -1f
-    private var hoverY = -1f
+    private var badge: TextView? = null
+    private var lastCornerEvent = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -52,12 +56,37 @@ class TouchShieldService : AccessibilityService() {
         if (NokiaSession.isVisible) updateShield(true)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (shield == null || event?.eventType != AccessibilityEvent.TYPE_VIEW_HOVER_ENTER ||
+            event.packageName?.toString() != packageName) return
+        val description = event.source?.contentDescription?.toString()
+        if (description == CORNER_DESCRIPTION) recordCornerContact()
+    }
     override fun onInterrupt() = Unit
 
     override fun onGesture(gestureEvent: android.accessibilityservice.AccessibilityGestureEvent): Boolean {
         // In particular, never forward a double tap into a click or a drag.
         return true
+    }
+
+    private fun recordCornerContact() {
+        val now = SystemClock.elapsedRealtime()
+        // A hover, accessibility event and optional raw DOWN can describe the same finger.
+        if (now - lastCornerEvent < 180L) return
+        lastCornerEvent = now
+        if (cornerExit.onDown(0f, 0f, 1f, 1f, now)) {
+            badge?.visibility = View.INVISIBLE
+            sendBroadcast(Intent(ACTION_EXIT).setPackage(packageName))
+        } else {
+            badge?.let { label ->
+                label.text = "${cornerExit.progress}/10"
+                label.visibility = View.VISIBLE
+                label.postDelayed({
+                    if (SystemClock.elapsedRealtime() - lastCornerEvent >= 1150L)
+                        label.visibility = View.INVISIBLE
+                }, 1200L)
+            }
+        }
     }
 
     private fun updateShield(active: Boolean) {
@@ -76,34 +105,61 @@ class TouchShieldService : AccessibilityService() {
                     setGestureDetectionPassthroughRegion(Display.DEFAULT_DISPLAY, Region())
                 }
                 manager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                val view = object : View(this) {
+                val view = object : FrameLayout(this) {
                     override fun onTouchEvent(event: MotionEvent): Boolean = true
-
-                    override fun onHoverEvent(event: MotionEvent): Boolean {
-                        when (event.actionMasked) {
-                            MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> {
-                                hoverX = event.x; hoverY = event.y
-                            }
-                            MotionEvent.ACTION_HOVER_EXIT -> {
-                                val x = if (hoverX < 0f) event.x else hoverX
-                                val y = if (hoverY < 0f) event.y else hoverY
-                                if (cornerExit.onDown(x, y, width.toFloat(), height.toFloat(),
-                                        SystemClock.elapsedRealtime())) {
-                                    sendBroadcast(Intent(ACTION_EXIT).setPackage(packageName))
-                                }
-                                hoverX = -1f; hoverY = -1f
-                            }
-                        }
-                        return true
-                    }
-
+                    override fun onHoverEvent(event: MotionEvent): Boolean = true
                     override fun onGenericMotionEvent(event: MotionEvent): Boolean = true
                 }.apply {
                     isClickable = true
                     isFocusable = false
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                     setBackgroundColor(Color.TRANSPARENT)
                 }
+                val corner = object : FrameLayout(this) {
+                    private var hovering = false
+
+                    override fun onHoverEvent(event: MotionEvent): Boolean {
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_HOVER_ENTER -> {
+                                hovering = true
+                                recordCornerContact()
+                            }
+                            MotionEvent.ACTION_HOVER_MOVE -> if (!hovering) {
+                                hovering = true
+                                recordCornerContact()
+                            }
+                            MotionEvent.ACTION_HOVER_EXIT -> hovering = false
+                        }
+                        return true
+                    }
+
+                    override fun onTouchEvent(event: MotionEvent): Boolean {
+                        if (event.actionMasked == MotionEvent.ACTION_DOWN) recordCornerContact()
+                        return true
+                    }
+                }.apply {
+                    isClickable = true
+                    isFocusable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                    contentDescription = CORNER_DESCRIPTION
+                    setBackgroundColor(Color.TRANSPARENT)
+                }
+                val metrics = resources.displayMetrics
+                view.addView(corner, FrameLayout.LayoutParams(
+                    (metrics.widthPixels * .24f).toInt().coerceAtLeast(1),
+                    (metrics.heightPixels * .22f).toInt().coerceAtLeast(1),
+                    Gravity.TOP or Gravity.LEFT
+                ))
+                val label = TextView(this).apply {
+                    textSize = 13f
+                    setTextColor(Color.WHITE)
+                    setBackgroundColor(0xBB262333.toInt())
+                    visibility = View.INVISIBLE
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }
+                corner.addView(label, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.LEFT
+                ))
                 val params = WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -119,6 +175,7 @@ class TouchShieldService : AccessibilityService() {
                 }
                 manager?.addView(view, params)
                 shield = view
+                badge = label
             } catch (_: Exception) {
                 removeShield()
                 info.flags = originalFlags
@@ -139,7 +196,8 @@ class TouchShieldService : AccessibilityService() {
     private fun removeShield() {
         try { shield?.let { manager?.removeView(it) } } catch (_: Exception) { }
         shield = null
-        hoverX = -1f; hoverY = -1f
+        badge = null
+        cornerExit.reset()
     }
 
     override fun onDestroy() {
