@@ -31,7 +31,8 @@ class TouchShieldService : AccessibilityService() {
                 it.resolveInfo?.serviceInfo?.packageName != context.packageName &&
                     it.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE != 0
             }
-            return connected != null && !conflicting
+            return connected != null && !conflicting &&
+                (!NokiaSession.isVisible || connected?.shield != null)
         }
 
         fun setSessionActive(active: Boolean) {

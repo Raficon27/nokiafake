@@ -30,7 +30,7 @@
 
 ## בנייה והתקנה
 
-פתח את הפרויקט ב־Android Studio עם JDK 17 ו־Android SDK Platform 35 והפעל **Build > Build APK(s)**. התוצר הוא `app/build/outputs/apk/debug/app-debug.apk`. ניתן גם להריץ `gradle --no-daemon assembleDebug` עם Gradle 8.7 מותקן. GitHub Actions בונה APK Debug בכל push ל־`main` ושומר artifact בשם `NokiaMode-debug-apk` למשך 30 יום. גרסת Debug שנבנתה על רץ אחר עשויה להיחתם במפתח אחר; אם העדכון נחסם בשל חתימה, צריך להסיר APK קודם ולהתקין מחדש, ונתוני האפליקציה המקומיים יימחקו.
+פתח את הפרויקט ב־Android Studio עם JDK 17 ו־Android SDK Platform 35 והפעל **Build > Build APK(s)**. התוצר הוא `app/build/outputs/apk/debug/app-debug.apk`. ניתן גם להריץ `gradle --no-daemon assembleDebug` עם Gradle 8.7 מותקן. GitHub Actions בונה APK Debug בכל push ל־`main`, שומר artifact בשם `NokiaMode-debug-apk` למשך 30 יום, ומפרסם את גרסה 1.3 הראשונה כ־[APK ישיר](https://github.com/Raficon27/nokiafake/releases/download/v1.3-debug/NokiaFake-v1.3-debug.apk). גרסת Debug שנבנתה על רץ אחר עשויה להיחתם במפתח אחר; אם העדכון נחסם בשל חתימה, צריך להסיר APK קודם ולהתקין מחדש, ונתוני האפליקציה המקומיים יימחקו.
 
 להתקנה ב־QIN F21 Pro: התקן APK, פתח, בחר מצב, אשר את שורות ההרשאה הנדרשות ואת שירות הנגישות, ואז הפעל. בדוק בפועל את כל מקשי המכשיר ואת חסימת גרירת וילון ההתראות. כרגע לא בוצעה בדיקת חומרה על F21 Pro במסגרת סביבת הפיתוח, ולכן אין טענה לאימות חומרתי. תיקיית `MMI_RES` ותמונות המשתמש לא היו זמינות במערכת הקבצים של הפרויקט הנוכחי; לא הועתקו נכסי קושחה.
 
