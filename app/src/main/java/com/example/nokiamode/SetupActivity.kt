@@ -3,6 +3,7 @@ package com.example.nokiamode
 import android.Manifest
 import android.app.Activity
 import android.app.role.RoleManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Canvas
@@ -21,7 +22,8 @@ import android.widget.Toast
 class SetupActivity : Activity() {
     private data class Grant(val title: String, val detail: String,
                              val permissions: Array<String> = emptyArray(), val kind: String = "runtime")
-    private var full = false
+    private var mode = NokiaMode.DEMO
+    private val modeTabs = listOf(NokiaMode.SAFE, NokiaMode.DEMO, NokiaMode.FULL)
     private var focus = 0
     private var scroll = 0
     private lateinit var view: SetupView
@@ -31,26 +33,29 @@ class SetupActivity : Activity() {
         if (ModeStore.isConfigured(this) && !intent.getBooleanExtra("change_mode", false)) {
             startActivity(Intent(this, MainActivity::class.java)); finish(); return
         }
-        full = ModeStore.get(this) == NokiaMode.FULL
+        mode = ModeStore.get(this)
         view = SetupView()
         setContentView(view)
     }
 
     private fun grants(): List<Grant> {
         val common = mutableListOf(
-            Grant("חסימת מגע", if (Build.VERSION.SDK_INT >= 30)
-                "ברשימה בחר מצב Nokia ואשר" else "אשר הצגה מעל אפליקציות", kind = "overlay"),
-            Grant("מצלמה", "צילום בתוך מצב Nokia", arrayOf(Manifest.permission.CAMERA)),
+            Grant("חסימת מגע", "פתח נגישות, בחר מצב Nokia ואשר", kind = "accessibility"),
             Grant("גלריה וסרטונים", "קריאת תמונות וסרטונים", mediaPermissions()),
             Grant("מוזיקה", "קריאת קובצי שמע", audioPermission()),
-            Grant("רשמקול", "גישה למיקרופון", arrayOf(Manifest.permission.RECORD_AUDIO)),
             Grant("לוח שנה", "קריאת אירועים", arrayOf(Manifest.permission.READ_CALENDAR)),
             Grant("אנשי קשר", "שמות ומספרים", arrayOf(Manifest.permission.READ_CONTACTS)),
             Grant("יומן שיחות", "קריאת שיחות", arrayOf(Manifest.permission.READ_CALL_LOG))
         )
-        if (Build.VERSION.SDK_INT >= 33)
+        if (mode != NokiaMode.SAFE) common.addAll(listOf(
+            Grant("מצלמה ופנס", "צילום ושימוש בפנס", arrayOf(Manifest.permission.CAMERA)),
+            Grant("רשמקול", "גישה למיקרופון", arrayOf(Manifest.permission.RECORD_AUDIO))
+        ))
+        if (mode != NokiaMode.SAFE && Build.VERSION.SDK_INT >= 33)
             common.add(Grant("התראות", "שעון מעורר והודעות", arrayOf(Manifest.permission.POST_NOTIFICATIONS)))
-        if (full) common.addAll(listOf(
+        if (mode == NokiaMode.SAFE && smsRoleHeld())
+            common.add(Grant("שחרור תפקיד SMS", "בחר אפליקציית SMS אחרת לפני מצב בטוח", kind = "smsRelease"))
+        if (mode == NokiaMode.FULL) common.addAll(listOf(
             Grant("אפליקציית הודעות", "קבלת SMS אמיתי", kind = "sms"),
             Grant("קריאת הודעות", "הודעות נכנסות ושרשורים", arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)),
             Grant("חיוג", "שיחות יוצאות", arrayOf(Manifest.permission.CALL_PHONE)),
@@ -64,8 +69,10 @@ class SetupActivity : Activity() {
     private fun audioPermission() = if (Build.VERSION.SDK_INT >= 33)
         arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
         else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    private fun smsRoleHeld(): Boolean = SmsRoleGuard.isHeld(this)
     private fun granted(g: Grant): Boolean = when (g.kind) {
-        "overlay" -> Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)
+        "accessibility" -> TouchShieldService.isReady(this)
+        "smsRelease" -> !smsRoleHeld()
         "sms" -> if (Build.VERSION.SDK_INT < 29) true else {
             val rm = getSystemService(RoleManager::class.java)
             rm == null || !rm.isRoleAvailable(RoleManager.ROLE_SMS) || rm.isRoleHeld(RoleManager.ROLE_SMS)
@@ -74,14 +81,14 @@ class SetupActivity : Activity() {
     }
     private fun activate(g: Grant) {
         when (g.kind) {
-            "overlay" -> if (!granted(g)) {
-                Toast.makeText(this, if (Build.VERSION.SDK_INT >= 30)
-                    "ברשימת Android בחר מצב Nokia, אשר וחזור לכאן" else
-                    "אשר הצגה מעל אפליקציות וחזור לכאן", Toast.LENGTH_LONG).show()
-                try { startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")), 33) }
+            "accessibility" -> if (!granted(g)) {
+                Toast.makeText(this, "במסך נגישות בחר מצב Nokia, הפעל את השירות וחזור", Toast.LENGTH_LONG).show()
+                try { startActivityForResult(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), 33) }
                 catch (_: Exception) { openAppSettings() }
             }
+            "smsRelease" -> if (!granted(g)) try {
+                startActivityForResult(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS), 34)
+            } catch (_: Exception) { openAppSettings() }
             "sms" -> if (!granted(g) && Build.VERSION.SDK_INT >= 29) {
                 getSystemService(RoleManager::class.java)?.let { rm ->
                     if (rm.isRoleAvailable(RoleManager.ROLE_SMS))
@@ -107,13 +114,16 @@ class SetupActivity : Activity() {
             Uri.parse("package:$packageName")))
     }
     private fun launch() {
-        val overlay = grants().first { it.kind == "overlay" }
-        if (!granted(overlay)) {
-            activate(overlay); return
+        val shield = grants().first { it.kind == "accessibility" }
+        if (!granted(shield)) {
+            activate(shield); return
+        }
+        if (mode == NokiaMode.SAFE && smsRoleHeld()) {
+            activate(grants().first { it.kind == "smsRelease" }); return
         }
         if (grants().any { !granted(it) }) Toast.makeText(this,
             "הפונקציות שלא אושרו יופיעו כלא זמינות", Toast.LENGTH_LONG).show()
-        ModeStore.set(this, if (full) NokiaMode.FULL else NokiaMode.DEMO)
+        ModeStore.set(this, mode)
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
         finish()
     }
@@ -124,11 +134,15 @@ class SetupActivity : Activity() {
     }
     private fun choose() {
         when {
-            focus == 0 -> { full = !full; scroll = 0 }
+            focus == 0 -> changeMode(1)
             focus <= grants().size -> activate(grants()[focus - 1])
             else -> launch()
         }
         view.invalidate()
+    }
+    private fun changeMode(delta: Int) {
+        mode = modeTabs[(modeTabs.indexOf(mode) + delta + modeTabs.size) % modeTabs.size]
+        scroll = 0
     }
     private fun ensureVisible() {
         if (focus in 1..grants().size) {
@@ -142,7 +156,8 @@ class SetupActivity : Activity() {
         when (KeypadController.map(event).action) {
             KeyAction.UP -> focus = (focus - 1).coerceAtLeast(0)
             KeyAction.DOWN -> focus = (focus + 1).coerceAtMost(grants().size + 1)
-            KeyAction.LEFT, KeyAction.RIGHT -> if (focus == 0) { full = !full; scroll = 0 }
+            KeyAction.LEFT, KeyAction.RIGHT -> if (focus == 0)
+                changeMode(if (KeypadController.map(event).action == KeyAction.RIGHT) 1 else -1)
             KeyAction.OK -> choose()
             KeyAction.SOFT_LEFT, KeyAction.CALL -> requestNext()
             KeyAction.SOFT_RIGHT, KeyAction.END -> finish()
@@ -150,7 +165,13 @@ class SetupActivity : Activity() {
         }
         ensureVisible(); view.invalidate(); return true
     }
-    override fun onResume() { super.onResume(); if (::view.isInitialized) view.invalidate() }
+    override fun onResume() {
+        super.onResume()
+        if (::view.isInitialized) {
+            view.invalidate()
+            view.postDelayed({ if (::view.isInitialized) view.invalidate() }, 500)
+        }
+    }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
         if (requestCode == 31) {
@@ -189,11 +210,12 @@ class SetupActivity : Activity() {
             text(c, "בחר מצב, אשר הרשאות והפעל", 453f, 101f, 21f, white)
             text(c, "חצים ו־OK או לחיצה · החלקה לגלילת הרשאות", 453f, 133f, 16f,
                 0xFFC6BFCC.toInt())
-            listOf("פעולה מלאה", "מצב דמה").forEachIndexed { i, s ->
-                val x = if (i == 0) 248f else 14f
-                p.color = if ((i == 0) == full) orange else 0xFF383345.toInt()
-                c.drawRoundRect(x, 157f, x + 218f, 220f, 16f, 16f, p)
-                text(c, s, x + 109f, 197f, 22f, if ((i == 0) == full) Color.BLACK else white, Paint.Align.CENTER)
+            listOf("מצב בטוח", "מצב דמה", "פעולה מלאה").forEachIndexed { i, s ->
+                val x = 14f + i * 153f
+                p.color = if (modeTabs[i] == mode) orange else 0xFF383345.toInt()
+                c.drawRoundRect(x, 157f, x + 146f, 220f, 13f, 13f, p)
+                text(c, s, x + 73f, 197f, 18f,
+                    if (modeTabs[i] == mode) Color.BLACK else white, Paint.Align.CENTER)
             }
             if (focus == 0) { p.style = Paint.Style.STROKE; p.strokeWidth = 2f; p.color = white
                 c.drawRoundRect(12f, 155f, 468f, 222f, 16f, 16f, p); p.style = Paint.Style.FILL }
@@ -232,7 +254,10 @@ class SetupActivity : Activity() {
                 invalidate(); return true
             }
             when {
-                y in 153f..225f -> { full = x >= 240f; scroll = 0; focus = 0 }
+                y in 153f..225f -> {
+                    mode = modeTabs[((x - 14f) / 153f).toInt().coerceIn(0, 2)]
+                    scroll = 0; focus = 0
+                }
                 y in 280f..500f -> {
                     val idx = scroll + ((y - 280f) / 55f).toInt()
                     if (idx in grants().indices) { focus = idx + 1; activate(grants()[idx]) }

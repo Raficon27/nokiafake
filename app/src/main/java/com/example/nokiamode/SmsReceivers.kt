@@ -58,7 +58,7 @@ class MmsDeliverReceiver : BroadcastReceiver() {
 class RespondViaMessageService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (ModeStore.get(this) == NokiaMode.DEMO) {
+        if (ModeStore.get(this) != NokiaMode.FULL) {
             stopSelf(startId)
             return START_NOT_STICKY
         }

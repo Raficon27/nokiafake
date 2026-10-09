@@ -2,7 +2,7 @@ package com.example.nokiamode
 
 import android.content.Context
 
-internal enum class NokiaMode { FULL, DEMO }
+internal enum class NokiaMode { FULL, DEMO, SAFE }
 
 internal object ModeStore {
     private const val PREFS = "nokia_mode_setup"
@@ -14,13 +14,17 @@ internal object ModeStore {
     fun isConfigured(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(SETUP_VERSION, 0) >= 3
 
-    fun get(context: Context): NokiaMode =
-        if (context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(MODE, "DEMO") == "FULL")
-            NokiaMode.FULL else NokiaMode.DEMO
+    fun get(context: Context): NokiaMode = when (
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(MODE, "DEMO")
+    ) {
+        "FULL" -> NokiaMode.FULL
+        "SAFE" -> NokiaMode.SAFE
+        else -> NokiaMode.DEMO
+    }
 
     fun set(context: Context, mode: NokiaMode) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(MODE, mode.name).putInt(SETUP_VERSION, 3).apply()
+            .edit().putString(MODE, mode.name).putInt(SETUP_VERSION, 4).apply()
     }
 
     fun start(context: Context) {

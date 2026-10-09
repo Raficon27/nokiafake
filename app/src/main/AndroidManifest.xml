@@ -18,7 +18,6 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <application android:theme="@style/AppTheme" android:label="מצב Nokia" android:icon="@drawable/ic_nokia" android:usesCleartextTraffic="false" android:supportsRtl="true">
         <activity android:name=".SetupActivity" android:exported="true" android:screenOrientation="portrait">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
@@ -37,6 +36,13 @@
         <service android:name=".RespondViaMessageService" android:exported="true" android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
             <intent-filter><action android:name="android.intent.action.RESPOND_VIA_MESSAGE"/><category android:name="android.intent.category.DEFAULT"/><data android:scheme="sms"/><data android:scheme="smsto"/><data android:scheme="mms"/><data android:scheme="mmsto"/></intent-filter>
         </service>
-        <service android:name=".TouchShieldService" android:exported="false" />
+        <service android:name=".TouchShieldService" android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice"
+                android:resource="@xml/touch_shield_accessibility" />
+        </service>
     </application>
 </manifest>

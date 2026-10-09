@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewClicked"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:packageNames="com.example.nokiamode"
+    android:notificationTimeout="0"
+    android:canRequestTouchExplorationMode="true"
+    android:description="@string/touch_shield_description" />

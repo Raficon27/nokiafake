@@ -52,6 +52,7 @@ private data class MediaEntry(val id: Long, val title: String, val uri: Uri)
 /** Small-screen hardware-key UI for the independent device features. */
 @Suppress("DEPRECATION")
 class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
+    private val safeMode: Boolean get() = ModeStore.get(this) == NokiaMode.SAFE
     private var feature = "gallery"
     private val items = mutableListOf<MediaEntry>()
     private var cursor = 0
@@ -130,8 +131,11 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         handler.post(ticker)
     }
     override fun onResume() { super.onResume(); ImmersiveUi.apply(this)
-        if (feature == "camera" && texture?.isAvailable == true && camera == null) openCamera(texture!!.surfaceTexture!!)
+        if (!safeMode && feature == "camera" && texture?.isAvailable == true && camera == null) openCamera(texture!!.surfaceTexture!!)
+        display.postDelayed({ if (!isFinishing && !TouchShieldService.isReady(this)) finish() }, 350)
     }
+    override fun onStart() { super.onStart(); NokiaSession.onScreenStarted() }
+    override fun onStop() { NokiaSession.onScreenStopped(); super.onStop() }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) window.decorView.post { ImmersiveUi.apply(this) }
@@ -173,7 +177,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     private fun loadRecordings() {
         items.clear()
         val folder = File(filesDir, "recordings")
-        folder.mkdirs()
+        if (!safeMode) folder.mkdirs()
         folder.listFiles()?.sortedByDescending { it.lastModified() }?.forEachIndexed { i, file ->
             items.add(MediaEntry(i.toLong(), file.name, Uri.fromFile(file)))
         }
@@ -207,7 +211,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                 .also { showItem() } else cursor = (cursor + n * if (feature == "gallery" && vertical) 3 else 1)
                 .coerceIn(0, (items.size - 1).coerceAtLeast(0))
             "music", "files", "recorder" -> cursor = (cursor + n).coerceIn(0, (items.size - 1).coerceAtLeast(0))
-            "camera" -> if (vertical && n < 0) switchCamera()
+            "camera" -> if (!safeMode && vertical && n < 0) switchCamera()
             "calendar" -> selectedDay.add(if (vertical) Calendar.MONTH else Calendar.DAY_OF_MONTH, n)
             "counters" -> if (!vertical) counterType = (counterType + n + 2) % 2
             "ninja" -> if (!vertical) ninjaX = (ninjaX + n * 24).coerceIn(20f, 460f)
@@ -216,7 +220,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     private fun digit(s: String) {
         when (feature) {
             "alarms" -> {
-                if (s == "#") cancelAlarm()
+                if (s == "#") { if (safeMode) warn("מצב בטוח: שינוי שעון מעורר חסום") else cancelAlarm() }
                 else if (s.length == 1 && s[0].isDigit() && alarmDigits.length < 4) alarmDigits += s
             }
             "counters" -> {
@@ -229,6 +233,14 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         }
     }
     private fun select() {
+        if (safeMode && feature in setOf("camera", "flashlight", "alarms")) {
+            warn("מצב בטוח: פעולה זו דורשת שינוי במכשיר"); return
+        }
+        if (safeMode && feature == "recorder") {
+            if (items.isNotEmpty()) playAudio(items[cursor].uri)
+            else warn("אין הקלטות להצגה")
+            return
+        }
         when (feature) {
             "gallery", "videos", "files" -> if (items.isNotEmpty()) {
                 if (opened && feature == "videos") {
@@ -303,6 +315,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         } catch (e: Exception) { info = "הפנס אינו זמין" }
     }
     private fun setTorch(on: Boolean) {
+        if (safeMode && on) { warn("הפנס חסום במצב בטוח"); return }
         try {
             val id = torchId ?: return
             getSystemService(CameraManager::class.java).setTorchMode(id, on)
@@ -310,6 +323,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         } catch (e: Exception) { warn("הפנס אינו זמין כעת") }
     }
     private fun startRecording() {
+        if (safeMode) { warn("הקלטה חסומה במצב בטוח"); return }
         if (!permitted(Manifest.permission.RECORD_AUDIO)) { warn("אין הרשאת מיקרופון"); return }
         try {
             val folder = File(filesDir, "recordings").apply { mkdirs() }
@@ -330,6 +344,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         finally { current.release(); recorder = null; if (feature == "recorder") loadRecordings() }
     }
     private fun scheduleAlarm() {
+        if (safeMode) { warn("קביעת שעון מעורר חסומה במצב בטוח"); return }
         if (alarmDigits.length != 4) { warn("הקלד שעה בארבע ספרות"); return }
         val hour = alarmDigits.substring(0, 2).toInt(); val minute = alarmDigits.substring(2).toInt()
         if (hour > 23 || minute > 59) { warn("שעה לא תקינה"); return }
@@ -349,6 +364,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         } catch (e: Exception) { warn("לא ניתן לקבוע שעון מעורר") }
     }
     private fun cancelAlarm() {
+        if (safeMode) { warn("ביטול שעון מעורר חסום במצב בטוח"); return }
         val pending = PendingIntent.getBroadcast(this, 1, Intent(this, AlarmReceiver::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         (getSystemService(ALARM_SERVICE) as AlarmManager).cancel(pending)
@@ -370,6 +386,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     }
     private fun closeCamera() { try { camera?.stopPreview(); camera?.release() } catch (_: Exception) {} ; camera = null }
     private fun openCamera(surface: SurfaceTexture) {
+        if (safeMode) { info = "מצלמה אינה זמינה במצב בטוח"; display.invalidate(); return }
         if (!permitted(Manifest.permission.CAMERA)) { info = "אין הרשאת מצלמה"; display.invalidate(); return }
         try {
             closeCamera()
@@ -389,6 +406,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         texture?.surfaceTexture?.let { openCamera(it) }
     }
     private fun takePhoto() {
+        if (safeMode) { warn("צילום חסום במצב בטוח"); return }
         val cam = camera ?: run { warn("המצלמה אינה זמינה"); return }
         try {
             cam.takePicture(null, null, Camera.PictureCallback { bytes, _ ->
@@ -410,6 +428,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         } catch (e: Exception) { warn("הצילום נכשל") }
     }
     private fun startVideo() {
+        if (safeMode) { warn("צילום וידאו חסום במצב בטוח"); return }
         val cam = camera ?: run { warn("המצלמה אינה זמינה"); return }
         if (!permitted(Manifest.permission.CAMERA) || !permitted(Manifest.permission.RECORD_AUDIO)) {
             warn("דרושות הרשאות מצלמה ומיקרופון"); return
@@ -541,7 +560,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                 }
                 "videos", "music", "files", "recorder" -> {
                     if (feature == "recorder") {
-                        text(c, if (recorder == null) "OK להתחיל הקלטה" else "● מקליט... OK לעצירה",
+                        text(c, if (safeMode) "OK להאזנה להקלטה" else if (recorder == null) "OK להתחיל הקלטה" else "● מקליט... OK לעצירה",
                             449f, 113f, 20f, orange)
                     }
                     if (items.isEmpty()) text(c, info.ifBlank { "אין קבצים" }, 449f, 275f, 20f)
@@ -553,6 +572,8 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                     }
                 }
                 "camera" -> {
+                    if (safeMode) { text(c, "הצילום כבוי במצב בטוח", 240f, 296f, 24f,
+                        white, Paint.Align.CENTER) }
                     p.color = orange; c.drawCircle(240f, 573f, 26f, p)
                     p.color = Color.WHITE; c.drawCircle(240f, 573f, 18f, p)
                     text(c, (if (cameraVideoMode) "וידאו" else "תמונה") +
@@ -562,14 +583,14 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                     p.color = if (torch) 0xFFFFD671.toInt() else 0xFF555164.toInt()
                     c.drawCircle(240f, 286f, 103f, p)
                     text(c, if (torch) "פועל" else "כבוי", 240f, 300f, 38f, white, Paint.Align.CENTER)
-                    text(c, "OK להפעלה או כיבוי", 240f, 485f, 21f, white, Paint.Align.CENTER)
+                    text(c, if (safeMode) "הפנס כבוי במצב בטוח" else "OK להפעלה או כיבוי", 240f, 485f, 21f, white, Paint.Align.CENTER)
                 }
                 "alarms" -> {
                     val hour = alarmDigits.padEnd(4, '_')
                     text(c, hour.substring(0, 2) + ":" + hour.substring(2), 240f, 274f, 64f,
                         orange, Paint.Align.CENTER)
-                    text(c, "הקלד HHMM ואשר ב־OK", 240f, 360f, 20f, white, Paint.Align.CENTER)
-                    text(c, "# לביטול השעון", 240f, 405f, 18f, white, Paint.Align.CENTER)
+                    text(c, if (safeMode) "תצוגה בלבד במצב בטוח" else "הקלד HHMM ואשר ב־OK", 240f, 360f, 20f, white, Paint.Align.CENTER)
+                    if (!safeMode) text(c, "# לביטול השעון", 240f, 405f, 18f, white, Paint.Align.CENTER)
                 }
                 "calendar" -> {
                     text(c, SimpleDateFormat("EEEE  dd.MM.yyyy", Locale("he", "IL")).format(selectedDay.time),

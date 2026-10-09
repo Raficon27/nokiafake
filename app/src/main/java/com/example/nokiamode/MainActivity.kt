@@ -83,7 +83,11 @@ class MainActivity : Activity() {
         if (!ModeStore.isConfigured(this)) {
             startActivity(Intent(this, SetupActivity::class.java)); finish(); return
         }
-        demoMode = ModeStore.get(this) == NokiaMode.DEMO
+        demoMode = ModeStore.get(this) != NokiaMode.FULL
+        if (ModeStore.get(this) == NokiaMode.SAFE && SmsRoleGuard.isHeld(this)) {
+            startActivity(Intent(this, SetupActivity::class.java).putExtra("change_mode", true))
+            finish(); return
+        }
         ModeStore.start(this)
         applyImmersiveMode()
         ui = NokiaView(); setContentView(ui); handler.post(clockTick)
@@ -91,13 +95,24 @@ class MainActivity : Activity() {
         if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(exitReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(exitReceiver, filter)
         exitReceiverRegistered = true
-        startTouchShield()
         if(intent?.action==Intent.ACTION_SENDTO && !demoMode){
             composeNumber=intent.data?.schemeSpecificPart?.substringBefore('?').orEmpty()
             editor.reset();screen=Screen.COMPOSE
         }
     }
-    override fun onResume() { super.onResume(); applyImmersiveMode() }
+    override fun onResume() {
+        super.onResume(); applyImmersiveMode()
+        ui.postDelayed({
+            if (!isFinishing && (!TouchShieldService.isReady(this) ||
+                    ModeStore.get(this) == NokiaMode.SAFE && SmsRoleGuard.isHeld(this))) {
+                ModeStore.stop(this)
+                startActivity(Intent(this, SetupActivity::class.java).putExtra("change_mode", true))
+                finish()
+            }
+        }, 350)
+    }
+    override fun onStart() { super.onStart(); NokiaSession.onScreenStarted() }
+    override fun onStop() { NokiaSession.onScreenStopped(); super.onStop() }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) window.decorView.post { applyImmersiveMode() }
@@ -177,7 +192,7 @@ class MainActivity : Activity() {
         Screen.COMPOSE -> sendSms()
         Screen.CALC -> { calcInput=calculate(calcInput) }
         Screen.SETTINGS -> when(cursor) {
-            1 -> { ModeStore.stop(this);stopService(Intent(this,TouchShieldService::class.java));startActivity(Intent(this,SetupActivity::class.java).putExtra("change_mode",true));finish() }
+            1 -> { ModeStore.stop(this);startActivity(Intent(this,SetupActivity::class.java).putExtra("change_mode",true));finish() }
             2 -> open(Screen.KEYS)
             3 -> screen=Screen.HOME
             else -> Unit
@@ -204,12 +219,6 @@ class MainActivity : Activity() {
     };cursor=0;ui.invalidate() }
     private fun softLeft(){when(screen){Screen.HOME->{contactsReturn=Screen.HOME;searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.CONTACT->{composeNumber=selected.number;composeReturn=Screen.CONTACT;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.CONVERSATION->{composeReturn=Screen.CONVERSATION;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.THREADS->newMessage();Screen.COMPOSE->sendSms();else->select()}}
     private fun softRight(){if(screen==Screen.HOME){threadsReturn=Screen.HOME;loadSms();screen=Screen.THREADS}else back()}
-    private fun startTouchShield() {
-        if (android.os.Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
-            try { startService(Intent(this, TouchShieldService::class.java)) }
-            catch (_: Exception) { toast("לא ניתן להפעיל חסימת מגע") }
-        }
-    }
     private fun callOrAnswer() {
         if (screen == Screen.DEMO_CALL) { demoCallActive=true; return }
         if (screen == Screen.HOME) { dial="";dialerReturn=Screen.HOME;if(contacts.isEmpty())loadContacts();open(Screen.DIALER);return }
@@ -252,7 +261,7 @@ class MainActivity : Activity() {
         } catch(_:Exception){input}
     }
     private fun applyOp(op:Char,a:Double,b:Double)=when(op){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b }
-    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);stopService(Intent(this,TouchShieldService::class.java));super.onDestroy()}
+    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);super.onDestroy()}
     private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(255,151,59);private val bg=Color.rgb(16,14,29);private val fallbackExit=CornerExitDetector()
         override fun onTouchEvent(event:android.view.MotionEvent):Boolean{
             if(event.actionMasked==android.view.MotionEvent.ACTION_DOWN &&
@@ -275,7 +284,7 @@ class MainActivity : Activity() {
                 Screen.CALC->{title(c,"מחשבון");txt(c,calcInput.ifBlank{"0"},450f,250f,47f,Color.WHITE);p.color=0xFFBD422F.toInt();c.drawRect(44f,318f,436f,490f,p);txt(c,"+",290f,376f,52f,Color.WHITE,Paint.Align.CENTER);txt(c,"−",190f,428f,49f,Color.WHITE,Paint.Align.CENTER);txt(c,"÷",190f,376f,49f,Color.WHITE,Paint.Align.CENTER);txt(c,"×",290f,428f,49f,Color.WHITE,Paint.Align.CENTER);txt(c,"חצים: פעולות   * כפל   # חילוק   OK =",240f,539f,16f,Color.WHITE,Paint.Align.CENTER)}
                 Screen.SNAKE->{title(c,"Snake  ·  $snakeScore");for(y in 0..19)for(x in 0..19){p.color=if(snakeBody.contains(Pair(x,y)))green else if(x==foodX&&y==foodY)Color.RED else Color.DKGRAY;c.drawRect(35+x*20f,120+y*18f,50+x*20f,133+y*18f,p)};txt(c,"חצים או 2/4/6/8",240f,525f,16f,Color.WHITE,Paint.Align.CENTER)}
                 Screen.ZMANIM->{title(c,"זמני היום");listOf("עלות השחר","טלית ותפילין","הנץ החמה","סוף זמן שמע","חצות היום","מנחה גדולה","מנחה קטנה","פלג המנחה","שקיעה","צאת הכוכבים").forEachIndexed{i,s->row(c,i,"$s       —",i==cursor)};txt(c,"הזמנים דורשים מיקום והגדרות הלכתיות",240f,535f,14f,Color.GRAY,Paint.Align.CENTER)}
-                Screen.SETTINGS->{title(c,"הגדרות");val minutes=ModeStore.duration(this@MainActivity)/60000;listOf("מצב: "+(if(demoMode)"דמה" else "פעולה מלאה"),"החלף מצב","בדיקת מקשים","מסך הבית","זמן שימוש: ${minutes/60} שעות ${minutes%60} דקות").forEachIndexed{i,s->row(c,i,s,i==cursor)}}
+                Screen.SETTINGS->{title(c,"הגדרות");val minutes=ModeStore.duration(this@MainActivity)/60000;val label=when(ModeStore.get(this@MainActivity)){NokiaMode.SAFE->"בטוח";NokiaMode.DEMO->"דמה";NokiaMode.FULL->"פעולה מלאה"};listOf("מצב: "+label,"החלף מצב","בדיקת מקשים","מסך הבית","זמן שימוש: ${minutes/60} שעות ${minutes%60} דקות").forEachIndexed{i,s->row(c,i,s,i==cursor)}}
                 Screen.KEYS->{title(c,"בדיקת מקשים");txt(c,lastPhysicalKey,440f,220f,19f,Color.WHITE);txt(c,"לחץ על כל מקש כדי לראות את הזיהוי",440f,290f,18f,Color.WHITE);txt(c,"מקש ימני לחזרה",440f,330f,17f,green)}
                 Screen.HELP->{title(c,"מידע");wrap(c,notice,35f,120f,410f,30f)} }
             p.color=Color.rgb(29,27,43);c.drawRect(0f,583f,480f,640f,p);txt(c,softLeft(),34f,620f,17f,Color.WHITE,Paint.Align.LEFT);txt(c,if(screen==Screen.MENU)"בחר" else "OK",240f,620f,18f,Color.WHITE,Paint.Align.CENTER);txt(c,softRight(),446f,620f,17f,Color.WHITE,Paint.Align.RIGHT);c.restore()}
