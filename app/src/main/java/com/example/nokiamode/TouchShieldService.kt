@@ -59,7 +59,8 @@ class TouchShieldService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (shield == null || event?.eventType != AccessibilityEvent.TYPE_VIEW_HOVER_ENTER ||
             event.packageName?.toString() != packageName) return
-        val description = event.source?.contentDescription?.toString()
+        val description = event.contentDescription?.toString() ?:
+            event.source?.contentDescription?.toString()
         if (description == CORNER_DESCRIPTION) recordCornerContact()
     }
     override fun onInterrupt() = Unit
@@ -118,6 +119,8 @@ class TouchShieldService : AccessibilityService() {
                     private var hovering = false
 
                     override fun onHoverEvent(event: MotionEvent): Boolean {
+                        // The base implementation also emits TYPE_VIEW_HOVER_ENTER for the service.
+                        super.onHoverEvent(event)
                         when (event.actionMasked) {
                             MotionEvent.ACTION_HOVER_ENTER -> {
                                 hovering = true

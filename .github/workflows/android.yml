@@ -36,8 +36,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v1.3.1-debug >/dev/null 2>&1; then
-            cp app/build/outputs/apk/debug/app-debug.apk NokiaFake-v1.3.1-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk NokiaFake-v1.3.1-debug.apk
+          if gh release view v1.3.1-debug >/dev/null 2>&1; then
+            gh release upload v1.3.1-debug NokiaFake-v1.3.1-debug.apk --clobber
+          else
             gh release create v1.3.1-debug NokiaFake-v1.3.1-debug.apk \
               --title 'NokiaFake 1.3.1 Debug' \
               --notes 'Debug APK with accessible exit corner and touch-count feedback. Verify corner taps and shade gestures on the QIN F21 Pro.' \
