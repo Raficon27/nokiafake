@@ -91,7 +91,6 @@ class MainActivity : Activity() {
         if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(exitReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(exitReceiver, filter)
         exitReceiverRegistered = true
-        StatusBarControl.enable(this)
         startTouchShield()
         if(intent?.action==Intent.ACTION_SENDTO && !demoMode){
             composeNumber=intent.data?.schemeSpecificPart?.substringBefore('?').orEmpty()
@@ -253,7 +252,7 @@ class MainActivity : Activity() {
         } catch(_:Exception){input}
     }
     private fun applyOp(op:Char,a:Double,b:Double)=when(op){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b }
-    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);stopService(Intent(this,TouchShieldService::class.java));StatusBarControl.disable(this);super.onDestroy()}
+    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);stopService(Intent(this,TouchShieldService::class.java));super.onDestroy()}
     private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(255,151,59);private val bg=Color.rgb(16,14,29);private val fallbackExit=CornerExitDetector()
         override fun onTouchEvent(event:android.view.MotionEvent):Boolean{
             if(event.actionMasked==android.view.MotionEvent.ACTION_DOWN &&
