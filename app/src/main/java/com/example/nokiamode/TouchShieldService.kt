@@ -16,8 +16,7 @@ class TouchShieldService : Service() {
     companion object { const val ACTION_EXIT = "com.example.nokiamode.EXIT_BY_CORNER" }
     private var windowManager: WindowManager? = null
     private var shield: View? = null
-    private var cornerTaps = 0
-    private var lastCornerTap = 0L
+    private val cornerExit = CornerExitDetector()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -27,18 +26,10 @@ class TouchShieldService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         shield = object : View(this) {
             override fun onTouchEvent(event: MotionEvent): Boolean {
-                if (event.action == MotionEvent.ACTION_UP) {
-                    val topLeft = event.rawX < resources.displayMetrics.widthPixels * 0.18f &&
-                        event.rawY < resources.displayMetrics.heightPixels * 0.14f
-                    if (topLeft) {
-                        val now = android.os.SystemClock.elapsedRealtime()
-                        cornerTaps = if (now - lastCornerTap < 1500L) cornerTaps + 1 else 1
-                        lastCornerTap = now
-                        if (cornerTaps >= 10) {
-                            cornerTaps = 0
-                            sendBroadcast(Intent(ACTION_EXIT).setPackage(packageName))
-                        }
-                    } else cornerTaps = 0
+                if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+                    cornerExit.onDown(event.x, event.y, width.toFloat(), height.toFloat(),
+                        android.os.SystemClock.elapsedRealtime())) {
+                    sendBroadcast(Intent(ACTION_EXIT).setPackage(packageName))
                 }
                 return true
             }
