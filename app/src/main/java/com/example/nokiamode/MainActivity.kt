@@ -30,7 +30,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { HOME, MENU, CONTACTS, CONTACT, DIALER, DEMO_CALL, THREADS, RECIPIENT, CONVERSATION, CALLLOG, COMPOSE, GALLERY, VIDEOS, CALC, SNAKE, ZMANIM, SETTINGS, KEYS, HELP }
+private enum class Screen { HOME, MENU, CONTACTS, CONTACT, DIALER, PRODUCT_INFO, QUICK_SETTINGS, DEMO_CALL, THREADS, RECIPIENT, CONVERSATION, CALLLOG, COMPOSE, GALLERY, VIDEOS, CALC, SNAKE, ZMANIM, SETTINGS, KEYS, HELP }
 private data class Person(val name: String, val number: String)
 private data class SmsItem(val address: String, val body: String, val date: Long, val type: Int)
 
@@ -63,6 +63,17 @@ class MainActivity : Activity() {
         }
     }
     private var dial = ""
+    private var poundPending = false
+    private var poundLongPressed = false
+    private var quickBrightness = 0
+    private val poundLongPress = Runnable {
+        if (poundPending && screen == Screen.HOME) {
+            poundLongPressed = true
+            poundPending = false
+            open(Screen.QUICK_SETTINGS)
+            ui.invalidate()
+        }
+    }
     private var messageText = ""
     private var composeNumber = ""
     private var recipientNumber = ""
@@ -121,8 +132,31 @@ class MainActivity : Activity() {
     private fun applyImmersiveMode() = ImmersiveUi.apply(this)
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val key = KeypadController.map(event)
+        if (key.action == KeyAction.DIGIT && key.symbol == "#" && event.action == KeyEvent.ACTION_UP && poundPending) {
+            handler.removeCallbacks(poundLongPress)
+            poundPending = false
+            if (!poundLongPressed) startHomeDial("#")
+            ui.invalidate()
+            return true
+        }
+        if (key.action == KeyAction.DIGIT && key.symbol == "#" && event.action == KeyEvent.ACTION_UP && poundLongPressed) {
+            poundLongPressed = false
+            return true
+        }
         if (event.action == KeyEvent.ACTION_UP) return key.action != KeyAction.UNKNOWN || super.dispatchKeyEvent(event)
         if (event.action != KeyEvent.ACTION_DOWN) return true
+        if (screen == Screen.HOME && key.action == KeyAction.DIGIT && key.symbol == "#") {
+            if (!poundPending && !poundLongPressed) {
+                poundPending = true
+                handler.postDelayed(poundLongPress, 550)
+            }
+            return true
+        }
+        if (poundPending) {
+            handler.removeCallbacks(poundLongPress)
+            poundPending = false
+            startHomeDial("#")
+        }
         lastPhysicalKey = "KeyCode ${event.keyCode} · ScanCode ${event.scanCode} · ${key.action}"
         if (screen == Screen.KEYS) {
             if (key.action == KeyAction.SOFT_RIGHT || key.action == KeyAction.END) back()
@@ -132,6 +166,7 @@ class MainActivity : Activity() {
         if (screen == Screen.DIALER && key.action == KeyAction.DIGIT) {
             dial += key.symbol
             if (dial == "1234") { leaveMode(); return true }
+            if (dial == "*#0000#") { dial = ""; open(Screen.PRODUCT_INFO); ui.invalidate(); return true }
             ui.invalidate(); return true
         }
         when (key.action) {
@@ -156,6 +191,7 @@ class MainActivity : Activity() {
         }
         ui.invalidate(); return true
     }
+    private fun startHomeDial(first:String) { dial=first;dialerReturn=Screen.HOME;if(contacts.isEmpty() && checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED)loadContacts();open(Screen.DIALER) }
     private fun move(n:Int) { when(screen) { Screen.SNAKE -> turnSnake(0,n); Screen.MENU -> {val next=cursor+n*3;if(next in menus.indices)cursor=next}; Screen.CALC -> calcInput += if(n<0) "*" else "/"; Screen.COMPOSE -> editor.commit(); else -> cursor=(cursor+n).coerceIn(0,maxIndex()) } }
     private fun horizontal(n:Int) { when(screen) {
         Screen.SNAKE -> turnSnake(n,0)
@@ -163,10 +199,11 @@ class MainActivity : Activity() {
         Screen.CALC -> calcInput += if(n<0) "-" else "+"
         Screen.COMPOSE -> editor.move(n)
         Screen.MENU -> { val next=cursor+n; if(next in menus.indices && next/3==cursor/3)cursor=next }
+        Screen.QUICK_SETTINGS -> if(cursor==0 && ModeStore.get(this)!=NokiaMode.SAFE) setQuickBrightness((quickBrightness+n).coerceIn(0,5))
         else -> cursor=(cursor+n).coerceIn(0,maxIndex())
     } }
-    private fun maxIndex() = when(screen){Screen.MENU->menus.lastIndex; Screen.CONTACTS->(visibleContacts().size-1).coerceAtLeast(0); Screen.THREADS->(smsAddresses.size-1).coerceAtLeast(0); Screen.CONVERSATION->(selectedThread.size-1).coerceAtLeast(0); Screen.CALLLOG->(callRows.size-1).coerceAtLeast(0); Screen.SETTINGS->4; else->0}
-    private fun enterDigit(d:String) { when(screen){Screen.DIALER->dial+=d; Screen.RECIPIENT->recipientNumber+=d; Screen.COMPOSE->{editor.insert(d,android.os.SystemClock.elapsedRealtime());messageText=editor.text}; Screen.CALC->calcInput+=when(d){"*"->"*";"#"->"/";else->d}; Screen.SNAKE->when(d){"2"->turnSnake(0,-1);"8"->turnSnake(0,1);"4"->turnSnake(-1,0);"6"->turnSnake(1,0);else->{}};Screen.CONTACTS->{searchEditor.insert(d,android.os.SystemClock.elapsedRealtime());contactSearch=searchEditor.text;cursor=0};else->{}} }
+    private fun maxIndex() = when(screen){Screen.MENU->menus.lastIndex; Screen.CONTACTS->(visibleContacts().size-1).coerceAtLeast(0); Screen.THREADS->(smsAddresses.size-1).coerceAtLeast(0); Screen.CONVERSATION->(selectedThread.size-1).coerceAtLeast(0); Screen.CALLLOG->(callRows.size-1).coerceAtLeast(0); Screen.SETTINGS->4; Screen.QUICK_SETTINGS->3; else->0}
+    private fun enterDigit(d:String) { when(screen){Screen.HOME->startHomeDial(d);Screen.DIALER->dial+=d; Screen.RECIPIENT->recipientNumber+=d; Screen.COMPOSE->{editor.insert(d,android.os.SystemClock.elapsedRealtime());messageText=editor.text}; Screen.CALC->calcInput+=when(d){"*"->"*";"#"->"/";else->d}; Screen.SNAKE->when(d){"2"->turnSnake(0,-1);"8"->turnSnake(0,1);"4"->turnSnake(-1,0);"6"->turnSnake(1,0);else->{}};Screen.CONTACTS->{searchEditor.insert(d,android.os.SystemClock.elapsedRealtime());contactSearch=searchEditor.text;cursor=0};else->{}} }
     private fun turnSnake(dx:Int,dy:Int){if(dx==-snakeDirection.first&&dy==-snakeDirection.second)return;snakeDirection=Pair(dx,dy)}
     private fun snakeStep(dx:Int,dy:Int){val head=snakeBody.first();val next=Pair((head.first+dx+20)%20,(head.second+dy+20)%20);if(snakeBody.dropLast(1).contains(next)){snakeBody.clear();snakeBody.addAll(listOf(Pair(5,5),Pair(4,5),Pair(3,5)));snakeScore=0;snakeDirection=Pair(1,0);return};snakeBody.add(0,next);snakeX=next.first;snakeY=next.second;if(next.first==foodX&&next.second==foodY){snakeScore++;foodX=(foodX*7+3)%20;foodY=(foodY*11+5)%20}else snakeBody.removeAt(snakeBody.lastIndex)}
     private fun select() { when(screen) {
@@ -183,6 +220,13 @@ class MainActivity : Activity() {
         Screen.CONTACTS -> { val list=visibleContacts();if(list.isNotEmpty()){selected=list[cursor.coerceIn(0,list.lastIndex)];open(Screen.CONTACT)} }
         Screen.CONTACT -> { dial=selected.number;dialerReturn=Screen.CONTACT;screen=Screen.DIALER }
         Screen.DIALER -> callOrAnswer()
+        Screen.PRODUCT_INFO -> back()
+        Screen.QUICK_SETTINGS -> when(cursor) {
+            0 -> if (ModeStore.get(this)==NokiaMode.SAFE) toast("במצב בטוח אין שינוי הגדרות") else setQuickBrightness((quickBrightness+1)%6)
+            1 -> if (ModeStore.get(this)==NokiaMode.SAFE) toast("במצב בטוח הפנס לקריאה בלבד") else feature("flashlight")
+            2 -> openSystemSettings(Settings.ACTION_WIFI_SETTINGS)
+            3 -> openSystemSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
+        }
         Screen.THREADS -> {val address=smsAddresses.getOrNull(cursor);if(address!=null){selectedThread=smsItems.filter{it.address==address}.sortedBy{it.date}.toMutableList();composeNumber=address;open(Screen.CONVERSATION)}else newMessage()}
         Screen.RECIPIENT -> if (recipientNumber.any { it.isDigit() }) {
             composeNumber=recipientNumber;editor.reset();messageText="";composeReturn=Screen.THREADS;screen=Screen.COMPOSE
@@ -201,6 +245,16 @@ class MainActivity : Activity() {
     } }
     private fun open(s:Screen, text:String?=null) { previous=screen;screen=s;cursor=0; if(text!=null){notice=text;screen=Screen.HELP};if(screen==Screen.SNAKE){snakeBody.clear();snakeBody.addAll(listOf(Pair(5,5),Pair(4,5),Pair(3,5)));snakeScore=0;snakeDirection=Pair(1,0);handler.removeCallbacks(snakeTick);handler.postDelayed(snakeTick,500)}else handler.removeCallbacks(snakeTick) }
     private fun feature(name:String) { startActivity(Intent(this, FeatureActivity::class.java).putExtra("feature",name)) }
+    private fun setQuickBrightness(level:Int) {
+        quickBrightness=level
+        val params=window.attributes
+        params.screenBrightness=if(level==0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else 0.12f+level*0.176f
+        window.attributes=params
+    }
+    private fun openSystemSettings(action:String) {
+        if (ModeStore.get(this)==NokiaMode.SAFE) { toast("במצב בטוח אין שינוי הגדרות"); return }
+        try { startActivity(Intent(action)) } catch (_:Exception) { toast("מסך ההגדרה אינו זמין במכשיר") }
+    }
     private fun leaveMode() { ModeStore.stop(this);finish() }
     private fun newMessage() { recipientNumber="";screen=Screen.RECIPIENT;cursor=0 }
     private fun back() { when(screen) {
@@ -211,6 +265,7 @@ class MainActivity : Activity() {
         Screen.THREADS -> screen=threadsReturn
         Screen.RECIPIENT -> screen=Screen.THREADS
         Screen.HELP -> screen=previous
+        Screen.PRODUCT_INFO, Screen.QUICK_SETTINGS -> screen=previous
         Screen.KEYS -> screen=Screen.SETTINGS
         Screen.DEMO_CALL -> { demoCallActive=false;screen=Screen.DIALER }
         Screen.DIALER -> {dial="";screen=dialerReturn}
@@ -261,7 +316,7 @@ class MainActivity : Activity() {
         } catch(_:Exception){input}
     }
     private fun applyOp(op:Char,a:Double,b:Double)=when(op){ '+'->a+b;'-'->a-b;'*'->a*b;else->a/b }
-    override fun onDestroy(){handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);super.onDestroy()}
+    override fun onDestroy(){handler.removeCallbacks(poundLongPress);handler.removeCallbacks(snakeTick);handler.removeCallbacks(clockTick);if(exitReceiverRegistered)unregisterReceiver(exitReceiver);if(isFinishing)ModeStore.stop(this);super.onDestroy()}
     private inner class NokiaView:View(this){private val p=Paint(3);private val green=Color.rgb(255,151,59);private val bg=Color.rgb(16,14,29);private val fallbackExit=CornerExitDetector()
         override fun onTouchEvent(event:android.view.MotionEvent):Boolean{
             if(event.actionMasked==android.view.MotionEvent.ACTION_DOWN &&
@@ -273,7 +328,9 @@ class MainActivity : Activity() {
                 Screen.MENU->{drawMoon(c);title(c,menus[cursor]);drawGrid(c)}
                 Screen.CONTACTS->{title(c,if(contactSearch.isBlank())"אנשי קשר" else "חיפוש: $contactSearch");val list=visibleContacts().map{it.name+"   "+it.number};if(list.isEmpty())txt(c,"אין התאמות",240f,300f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,list,cursor)}
                 Screen.CONTACT->{title(c,selected.name);txt(c,selected.number,240f,260f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,"OK: חייג   CALL: שיחה",240f,500f,17f,green,Paint.Align.CENTER)}
-                Screen.DIALER->{title(c,"חייגן");txt(c,dial.ifBlank{"הקלד מספר"},240f,257f,40f,Color.WHITE,Paint.Align.CENTER);val name=dialName();if(name.isNotEmpty())txt(c,name,240f,318f,24f,green,Paint.Align.CENTER);txt(c,"CALL לחיוג · מחיקה לתיקון",240f,480f,19f,Color.WHITE,Paint.Align.CENTER)}
+                Screen.DIALER->drawDialer(c)
+                Screen.PRODUCT_INFO->drawProductInfo(c)
+                Screen.QUICK_SETTINGS->drawQuickSettings(c)
                 Screen.DEMO_CALL->{title(c,"שיחה מדומה");p.color=0xFFB5C8DA.toInt();c.drawCircle(240f,224f,92f,p);txt(c,dialName().take(1).ifBlank{"◉"},240f,258f,84f,Color.BLACK,Paint.Align.CENTER);txt(c,dialName().ifBlank{dial},240f,380f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,if(demoCallActive)"שיחה מדומה פעילה" else "מתבצע חיוג מדומה...",240f,415f,20f,green,Paint.Align.CENTER);txt(c,(if(demoSpeaker)"רמקול: פועל" else "רמקול")+"        "+(if(demoMuted)"מושתק" else "השתקה"),240f,519f,19f,Color.WHITE,Paint.Align.CENTER);txt(c,"← רמקול   → השתקה   END סיום",240f,561f,15f,Color.WHITE,Paint.Align.CENTER)}
                 Screen.THREADS->{title(c,"הודעות");if(smsAddresses.isEmpty())txt(c,if(demoMode)"אין הודעות · לחץ חדש" else "אין שרשורים · לחץ חדש",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,smsAddresses.map{a->a+"   "+(smsItems.firstOrNull{it.address==a}?.body?:"")},cursor)}
                 Screen.RECIPIENT->{title(c,"הודעה חדשה");txt(c,"מספר נמען",440f,165f,23f,green);txt(c,recipientNumber.ifBlank{"הקלד מספר במקשים"},440f,235f,33f,Color.WHITE);txt(c,"OK לכתיבה · מחיקה לתיקון",440f,520f,18f,Color.WHITE)}
@@ -288,6 +345,54 @@ class MainActivity : Activity() {
                 Screen.KEYS->{title(c,"בדיקת מקשים");txt(c,lastPhysicalKey,440f,220f,19f,Color.WHITE);txt(c,"לחץ על כל מקש כדי לראות את הזיהוי",440f,290f,18f,Color.WHITE);txt(c,"מקש ימני לחזרה",440f,330f,17f,green)}
                 Screen.HELP->{title(c,"מידע");wrap(c,notice,35f,120f,410f,30f)} }
             p.color=Color.rgb(29,27,43);c.drawRect(0f,583f,480f,640f,p);txt(c,softLeft(),34f,620f,17f,Color.WHITE,Paint.Align.LEFT);txt(c,if(screen==Screen.MENU)"בחר" else "OK",240f,620f,18f,Color.WHITE,Paint.Align.CENTER);txt(c,softRight(),446f,620f,17f,Color.WHITE,Paint.Align.RIGHT);c.restore()}
+            private fun drawDialer(c:Canvas) {
+                title(c,"חייגן")
+                val digits=dial.ifBlank { "_" }
+                p.color=0xFFFF7138.toInt();c.drawRect(0f,100f,480f,174f,p)
+                txt(c,digits.takeLast(21),452f,153f,if(digits.length>14)33f else 51f,Color.WHITE)
+                val name=dialName()
+                val matches=if(dial.length>=2) contacts.filter { it.number.filter(Char::isDigit).contains(dial.filter(Char::isDigit)) }.take(3) else emptyList()
+                if(matches.isEmpty()) {
+                    p.color=0xFF5E648D.toInt();c.drawCircle(398f,247f,34f,p)
+                    txt(c,"?",398f,262f,38f,Color.WHITE,Paint.Align.CENTER)
+                    txt(c,if(name.isEmpty())"לא שמור" else name,342f,255f,22f,Color.WHITE)
+                } else matches.forEachIndexed { i,person ->
+                    val y=239f+i*78f
+                    p.color=intArrayOf(0xFF67B4ED.toInt(),0xFF8198CF.toInt(),0xFF646E9C.toInt())[i]
+                    c.drawCircle(408f,y,30f,p)
+                    txt(c,person.name.take(1),408f,y+10f,28f,Color.WHITE,Paint.Align.CENTER)
+                    txt(c,person.name.take(17),360f,y+2f,23f,Color.WHITE)
+                    txt(c,person.number.take(22),360f,y+25f,16f,0xFFB8C4DF.toInt())
+                }
+                txt(c,"CALL לחיוג     מחיקה לתיקון",240f,537f,17f,0xFFD2D8E8.toInt(),Paint.Align.CENTER)
+            }
+            private fun drawProductInfo(c:Canvas) {
+                title(c,"מידע מוצר")
+                p.color=0xFF83C7FB.toInt();c.drawRect(24f,112f,29f,533f,p)
+                txt(c,"מידע מוצר",449f,143f,36f,Color.WHITE)
+                txt(c,"Software Version:",448f,195f,27f,Color.WHITE)
+                val version=try{packageManager.getPackageInfo(packageName,0).versionName?:"1.4"}catch(_:Exception){"1.4"}
+                txt(c,"NokiaFake $version",448f,227f,27f,Color.WHITE)
+                txt(c,"TA model name:",448f,281f,27f,Color.WHITE)
+                txt(c,"Nokia 225 4G (ממשק)",448f,314f,26f,Color.WHITE)
+                txt(c,"Device:",448f,365f,27f,Color.WHITE)
+                txt(c,"QIN F21 Pro",448f,398f,27f,Color.WHITE)
+                txt(c,"הגרסה נוצרה על ידי",448f,466f,27f,Color.WHITE)
+                txt(c,"E.Keller",448f,499f,30f,Color.WHITE)
+            }
+            private fun drawQuickSettings(c:Canvas) {
+                title(c,"הגדרות קלות")
+                val safe=ModeStore.get(this@MainActivity)==NokiaMode.SAFE
+                val options=listOf("☼     בהירות", "◉     פנס", "⌁     Wi-Fi", "ᛒ     Bluetooth")
+                options.forEachIndexed { i,item ->
+                    val y=115f+i*98f
+                    if(i==cursor) {p.color=0xFFEA532D.toInt();c.drawRect(0f,y-35f,480f,y+48f,p)}
+                    txt(c,item,446f,y+8f,27f,Color.WHITE)
+                    val detail=when(i){0->if(quickBrightness==0)"אוטומטי" else "${quickBrightness}/5";1->if(safe)"קריאה בלבד" else "OK לפתיחה";else->if(safe)"קריאה בלבד" else "OK להגדרות"}
+                    txt(c,detail,438f,y+37f,16f,0xFFD6D4DF.toInt())
+                }
+                txt(c,if(safe)"מצב בטוח · ללא שינוי" else "חצים: בחירה    ← →: בהירות",240f,551f,18f,Color.WHITE,Paint.Align.CENTER)
+            }
             private fun drawMoon(c:Canvas){
                 p.shader=android.graphics.RadialGradient(326f,299f,226f,intArrayOf(0xFFE8A7BD.toInt(),0xFF955D8B.toInt(),0xFF463C64.toInt()),null,android.graphics.Shader.TileMode.CLAMP)
                 c.drawCircle(276f,304f,211f,p);p.shader=null
@@ -334,7 +439,7 @@ class MainActivity : Activity() {
             private fun title(c:Canvas,s:String){p.color=Color.rgb(48,46,67);c.drawRect(0f,34f,480f,78f,p);txt(c,s,23f,64f,21f,Color.WHITE,Paint.Align.LEFT)}
             private fun drawRows(c:Canvas,items:List<String>,selected:Int){val start=(selected-7).coerceAtLeast(0);items.drop(start).take(8).forEachIndexed{i,s->row(c,i,s,start+i==selected)}}
             private fun row(c:Canvas,i:Int,s:String,on:Boolean){val y=83f+i*59f;if(y>555) return;if(on){p.shader=android.graphics.LinearGradient(0f,y,480f,y,0xFFFFAE59.toInt(),0xFFEF6A3A.toInt(),android.graphics.Shader.TileMode.CLAMP);c.drawRect(0f,y,480f,y+57f,p);p.shader=null};val fg=Color.WHITE;txt(c,s.take(35),449f,y+36f,23f,fg,Paint.Align.RIGHT)}
-            private fun softLeft()=when(screen){Screen.HOME->"אנשי קשר";Screen.CONTACT,Screen.CONVERSATION->"SMS";Screen.THREADS->"חדש";Screen.COMPOSE->"שלח";else->"בחר"}
+            private fun softLeft()=when(screen){Screen.HOME->"אנשי קשר";Screen.CONTACT,Screen.CONVERSATION->"SMS";Screen.THREADS->"חדש";Screen.COMPOSE->"שלח";Screen.DIALER->"חייג";Screen.PRODUCT_INFO->"אישור";else->"בחר"}
             private fun softRight()=if(screen==Screen.HOME)"הודעות" else "חזרה"
             private fun txt(c:Canvas,s:String,x:Float,y:Float,size:Float,color:Int,align:Paint.Align=Paint.Align.RIGHT){p.color=color;p.textSize=size;p.typeface=android.graphics.Typeface.create("sans-serif-condensed",android.graphics.Typeface.NORMAL);p.textAlign=align;c.drawText(s,x,y,p)}
             private fun wrap(c:Canvas,s:String,x:Float,y:Float,w:Float,lh:Float){val words=s.split(" ");var line="";var yy=y;for(word in words){if(p.measureText(line+word)>w){txt(c,line,x+w,yy,18f,Color.WHITE);line="";yy+=lh};line+=word+" "};txt(c,line,x+w,yy,18f,Color.WHITE)}
