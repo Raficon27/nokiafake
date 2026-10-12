@@ -5,4 +5,5 @@
     android:packageNames="com.example.nokiamode"
     android:notificationTimeout="0"
     android:canRequestTouchExplorationMode="true"
+    android:canRequestFilterKeyEvents="true"
     android:description="@string/touch_shield_description" />

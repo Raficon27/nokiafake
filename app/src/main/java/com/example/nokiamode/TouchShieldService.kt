@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.Display
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -24,6 +25,7 @@ import android.widget.TextView
 class TouchShieldService : AccessibilityService() {
     companion object {
         const val ACTION_EXIT = "com.example.nokiamode.EXIT_BY_CORNER"
+        const val ACTION_END_KEY = "com.example.nokiamode.END_KEY_BACK"
         private const val CORNER_DESCRIPTION = "אזור יציאה ממצב Nokia"
         private var connected: TouchShieldService? = null
 
@@ -70,6 +72,13 @@ class TouchShieldService : AccessibilityService() {
         return true
     }
 
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (shield == null || !NokiaSession.isVisible || event.keyCode != KeyEvent.KEYCODE_ENDCALL) return false
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
+            sendBroadcast(Intent(ACTION_END_KEY).setPackage(packageName))
+        return true
+    }
+
     private fun recordCornerContact() {
         val now = SystemClock.elapsedRealtime()
         // A hover, accessibility event and optional raw DOWN can describe the same finger.
@@ -98,7 +107,8 @@ class TouchShieldService : AccessibilityService() {
             info.flags = originalFlags or
                 AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE or
                 AccessibilityServiceInfo.FLAG_REQUEST_MULTI_FINGER_GESTURES or
-                AccessibilityServiceInfo.FLAG_SERVICE_HANDLES_DOUBLE_TAP
+                AccessibilityServiceInfo.FLAG_SERVICE_HANDLES_DOUBLE_TAP or
+                AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
             try {
                 setServiceInfo(info)
                 if (Build.VERSION.SDK_INT >= 30) {
@@ -190,7 +200,8 @@ class TouchShieldService : AccessibilityService() {
                 info.flags = info.flags and
                     (AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE or
                         AccessibilityServiceInfo.FLAG_REQUEST_MULTI_FINGER_GESTURES or
-                        AccessibilityServiceInfo.FLAG_SERVICE_HANDLES_DOUBLE_TAP).inv()
+                        AccessibilityServiceInfo.FLAG_SERVICE_HANDLES_DOUBLE_TAP or
+                        AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS).inv()
                 setServiceInfo(info)
             }
         }

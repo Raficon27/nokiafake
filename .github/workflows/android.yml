@@ -36,12 +36,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk NokiaFake-v1.4.0-debug.apk
-          if gh release view v1.4.0-debug >/dev/null 2>&1; then
-            gh release upload v1.4.0-debug NokiaFake-v1.4.0-debug.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk NokiaFake-v1.5.0-debug.apk
+          if gh release view v1.5.0-debug >/dev/null 2>&1; then
+            gh release upload v1.5.0-debug NokiaFake-v1.5.0-debug.apk --clobber
           else
-            gh release create v1.4.0-debug NokiaFake-v1.4.0-debug.apk \
-              --title 'NokiaFake 1.4.0 Debug' \
-              --notes 'Home keypad dialer, *#0000# product information and long-press # quick settings. Prior touch shield, safe/demo/full modes and exit routes remain.' \
+            gh release create v1.5.0-debug NokiaFake-v1.5.0-debug.apk \
+              --title 'NokiaFake 1.5.0 Debug' \
+              --notes 'Nine-icon menu pages, menu dialing, improved SMS threads, camera switching, torch fallback, file tree browser and end-call key filtering. Prior modes and shortcuts remain.' \
               --prerelease --target "$GITHUB_SHA"
           fi

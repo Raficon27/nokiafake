@@ -31,6 +31,7 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.CalendarContract
 import android.provider.MediaStore
+import android.provider.DocumentsContract
 import android.view.KeyEvent
 import android.view.TextureView
 import android.view.Surface
@@ -47,13 +48,14 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 
-private data class MediaEntry(val id: Long, val title: String, val uri: Uri)
+private data class MediaEntry(val id: Long, val title: String, val uri: Uri, val mime: String = "")
 
 /** Small-screen hardware-key UI for the independent device features. */
 @Suppress("DEPRECATION")
 class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     private val safeMode: Boolean get() = ModeStore.get(this) == NokiaMode.SAFE
     private var feature = "gallery"
+    private var screenStarted = false
     private val items = mutableListOf<MediaEntry>()
     private var cursor = 0
     private var opened = false
@@ -75,6 +77,13 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     private var recordingFile: File? = null
     private var torchId: String? = null
     private var torch = false
+    private var legacyTorchCamera: Camera? = null
+    private var legacyTorchSurface: SurfaceTexture? = null
+    private var fileTree: Uri? = null
+    private val fileFolders = mutableListOf<Pair<Uri,String>>()
+    private val filePrefs by lazy { getSharedPreferences("file_browser", MODE_PRIVATE) }
+    private val folderMime = DocumentsContract.Document.MIME_TYPE_DIR
+    private val fileTreeRequest = 315
     private val pictureCache = object : LruCache<String, Bitmap>(12 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
@@ -101,7 +110,10 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     }
     private val exitReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == TouchShieldService.ACTION_EXIT) finish()
+            when(intent?.action) {
+                TouchShieldService.ACTION_EXIT -> finish()
+                TouchShieldService.ACTION_END_KEY -> if(screenStarted)featureBack()
+            }
         }
     }
 
@@ -120,12 +132,13 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
             ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         when (feature) {
-            "gallery", "videos", "music", "files" -> loadMedia()
+            "gallery", "videos", "music" -> loadMedia()
+            "files" -> loadFiles()
             "recorder" -> loadRecordings()
-            "flashlight" -> findTorch()
+            "flashlight" -> { findTorch(); if(!safeMode) setTorch(true) }
             "alarms" -> alarmDigits = getPreferences(MODE_PRIVATE).getString("alarm", "") ?: ""
         }
-        val filter = IntentFilter(TouchShieldService.ACTION_EXIT)
+        val filter = IntentFilter().apply { addAction(TouchShieldService.ACTION_EXIT); addAction(TouchShieldService.ACTION_END_KEY) }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(exitReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(exitReceiver, filter)
         handler.post(ticker)
@@ -134,8 +147,8 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         if (!safeMode && feature == "camera" && texture?.isAvailable == true && camera == null) openCamera(texture!!.surfaceTexture!!)
         display.postDelayed({ if (!isFinishing && !TouchShieldService.isReady(this)) finish() }, 350)
     }
-    override fun onStart() { super.onStart(); NokiaSession.onScreenStarted() }
-    override fun onStop() { NokiaSession.onScreenStopped(); super.onStop() }
+    override fun onStart() { super.onStart();screenStarted=true;NokiaSession.onScreenStarted() }
+    override fun onStop() { screenStarted=false;NokiaSession.onScreenStopped(); super.onStop() }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) window.decorView.post { ImmersiveUi.apply(this) }
@@ -174,6 +187,46 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         } catch (e: Exception) { info = "אין גישה לקבצים במכשיר" }
         display.invalidate()
     }
+    private fun chooseFileFolder() {
+        try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),fileTreeRequest) }
+        catch (_:Exception) { warn("בחירת תיקייה אינה זמינה במכשיר") }
+    }
+    @Deprecated("The platform document picker still returns a URI via this callback")
+    override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
+        super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode!=fileTreeRequest || resultCode!=RESULT_OK)return
+        val tree=data?.data ?: return
+        try {
+            contentResolver.takePersistableUriPermission(tree,Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            filePrefs.edit().putString("tree",tree.toString()).apply()
+            fileTree=tree;fileFolders.clear()
+            fileFolders.add(DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree)) to "תיקייה ראשית")
+            loadFiles()
+        }catch(_:Exception){warn("לא ניתן לקרוא את התיקייה שנבחרה")}
+    }
+    private fun loadFiles() {
+        items.clear();opened=false;cursor=0
+        val tree=fileTree ?: filePrefs.getString("tree",null)?.let(Uri::parse)?.also { fileTree=it }
+        if(tree==null) {info="בחר תיקייה להצגת הקבצים";chooseFileFolder();display.invalidate();return}
+        if(fileFolders.isEmpty()) fileFolders.add(
+            DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree)) to "תיקייה ראשית")
+        val current=fileFolders.last().first
+        try {
+            val children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,DocumentsContract.getDocumentId(current))
+            contentResolver.query(children,arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_MIME_TYPE),null,null,null)?.use { c ->
+                while(c.moveToNext()) {
+                    val id=c.getString(0) ?: continue
+                    items.add(MediaEntry(0,c.getString(1)?:"ללא שם",
+                        DocumentsContract.buildDocumentUriUsingTree(tree,id),c.getString(2)?:""))
+                }
+            }
+            items.sortWith(compareBy<MediaEntry>{it.mime!=folderMime}.thenBy{it.title.lowercase(Locale("he","IL"))})
+            info="${fileFolders.joinToString(" / "){it.second}}  ·  ${items.size} פריטים"
+        }catch(_:Exception){info="אין גישה לתיקייה. לחץ # לבחירה מחדש"}
+        display.invalidate()
+    }
     private fun loadRecordings() {
         items.clear()
         val folder = File(filesDir, "recordings")
@@ -188,16 +241,15 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         val key = KeypadController.map(e)
         if (e.repeatCount > 0 && key.action !in listOf(KeyAction.UP, KeyAction.DOWN, KeyAction.LEFT, KeyAction.RIGHT)) return true
         when (key.action) {
-            KeyAction.SOFT_RIGHT, KeyAction.END -> {
-                if (opened) closeItem() else finish()
-            }
+            KeyAction.SOFT_RIGHT, KeyAction.END -> featureBack()
             KeyAction.UP -> move(-1, true)
             KeyAction.DOWN -> move(1, true)
             KeyAction.LEFT -> move(-1, false)
             KeyAction.RIGHT -> move(1, false)
             KeyAction.CALL -> if (feature == "recorder" && items.isNotEmpty())
                 playAudio(items[cursor].uri) else select()
-            KeyAction.OK, KeyAction.SOFT_LEFT -> select()
+            KeyAction.OK -> select()
+            KeyAction.SOFT_LEFT -> if(feature=="camera") switchCamera() else if(feature=="files") chooseFileFolder() else select()
             KeyAction.DIGIT -> digit(key.symbol)
             KeyAction.DELETE -> if (feature == "alarms") alarmDigits = alarmDigits.dropLast(1)
                 else if (feature == "counters") timerMinutes = timerMinutes.dropLast(1)
@@ -205,12 +257,20 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         }
         display.invalidate(); return true
     }
+    private fun featureBack() {
+        when {
+            opened -> closeItem()
+            feature=="files" && fileFolders.size>1 -> {fileFolders.removeAt(fileFolders.lastIndex);loadFiles()}
+            else -> finish()
+        }
+    }
     private fun move(n: Int, vertical: Boolean) {
         when (feature) {
             "gallery", "videos" -> if (opened) cursor = (cursor + n).coerceIn(0, (items.size - 1).coerceAtLeast(0))
                 .also { showItem() } else cursor = (cursor + n * if (feature == "gallery" && vertical) 3 else 1)
                 .coerceIn(0, (items.size - 1).coerceAtLeast(0))
-            "music", "files", "recorder" -> cursor = (cursor + n).coerceIn(0, (items.size - 1).coerceAtLeast(0))
+            "music", "recorder" -> cursor = (cursor + n).coerceIn(0, (items.size - 1).coerceAtLeast(0))
+            "files" -> if(!opened) cursor=(cursor+n).coerceIn(0,(items.size-1).coerceAtLeast(0))
             "camera" -> if (!safeMode && vertical && n < 0) switchCamera()
             "calendar" -> selectedDay.add(if (vertical) Calendar.MONTH else Calendar.DAY_OF_MONTH, n)
             "counters" -> if (!vertical) counterType = (counterType + n + 2) % 2
@@ -230,6 +290,8 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
             "ninja" -> if (s == "4") ninjaX = (ninjaX - 24).coerceAtLeast(20f)
                 else if (s == "6") ninjaX = (ninjaX + 24).coerceAtMost(460f)
             "camera" -> if (s == "#" && videoRecorder == null) cameraVideoMode = !cameraVideoMode
+                else if(s=="0") switchCamera()
+            "files" -> if(s=="#") chooseFileFolder()
         }
     }
     private fun select() {
@@ -242,7 +304,9 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
             return
         }
         when (feature) {
-            "gallery", "videos", "files" -> if (items.isNotEmpty()) {
+            "files" -> if(opened) video?.let { if(it.isPlaying)it.pause() else it.start() }
+                else if(items.isNotEmpty()) showFile()
+            "gallery", "videos" -> if (items.isNotEmpty()) {
                 if (opened && feature == "videos") {
                     video?.let { if (it.isPlaying) it.pause() else it.start() }
                 } else { opened = true; showItem() }
@@ -269,6 +333,33 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
     private fun closeItem() {
         opened = false
         video?.stopPlayback(); video?.let { root.removeView(it) }; video = null
+        display.invalidate()
+    }
+    private fun showFile() {
+        val entry=items.getOrNull(cursor) ?: return
+        if(entry.mime==folderMime) {
+            fileFolders.add(entry.uri to entry.title)
+            loadFiles()
+            return
+        }
+        when {
+            entry.mime.startsWith("audio/") -> playAudio(entry.uri)
+            entry.mime.startsWith("image/") -> { opened=true;info=entry.title }
+            entry.mime.startsWith("video/") -> {
+                opened=true
+                video=VideoView(this).also { v ->
+                    val params=FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        (resources.displayMetrics.heightPixels*.70f).toInt())
+                    params.topMargin=(resources.displayMetrics.heightPixels*.15f).toInt()
+                    root.addView(v,0,params);v.setVideoURI(entry.uri)
+                    v.setOnPreparedListener { it.isLooping=false;v.start() }
+                    v.setOnErrorListener { _,_,_ -> warn("לא ניתן לנגן סרטון זה");true }
+                }
+            }
+            else -> try { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(entry.uri,entry.mime)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+                catch(_:Exception){warn("לא נמצא יישום לקובץ זה")}
+        }
         display.invalidate()
     }
     private fun showItem() {
@@ -311,16 +402,50 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                 chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true &&
                     chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
             }
-            if (torchId == null) info = "אין פנס במכשיר זה"
-        } catch (e: Exception) { info = "הפנס אינו זמין" }
+            if (torchId == null && Camera.getNumberOfCameras()==0) info = "אין פנס במכשיר זה"
+        } catch (e: Exception) { info = "מנסה להפעיל פנס דרך המצלמה" }
     }
     private fun setTorch(on: Boolean) {
         if (safeMode && on) { warn("הפנס חסום במצב בטוח"); return }
+        if (!on) {
+            try { legacyTorchCamera?.parameters?.let { params ->
+                params.flashMode=Camera.Parameters.FLASH_MODE_OFF
+                legacyTorchCamera?.parameters=params
+            } } catch(_:Exception) {}
+            try { legacyTorchCamera?.stopPreview();legacyTorchCamera?.release() } catch(_:Exception) {}
+            legacyTorchCamera=null
+            legacyTorchSurface?.release();legacyTorchSurface=null
+            try { torchId?.let { getSystemService(CameraManager::class.java).setTorchMode(it,false) } } catch(_:Exception) {}
+            torch=false;display.invalidate();return
+        }
+        if (!permitted(Manifest.permission.CAMERA)) { warn("אין הרשאת מצלמה לפנס — אשר במסך ההכנה");return }
+        // Legacy camera preview is supported by many keypad-phone firmwares whose
+        // Camera2 torch implementation reports success but does not light the LED.
         try {
-            val id = torchId ?: return
-            getSystemService(CameraManager::class.java).setTorchMode(id, on)
-            torch = on
-        } catch (e: Exception) { warn("הפנס אינו זמין כעת") }
+            for (i in 0 until Camera.getNumberOfCameras()) {
+                val facing=Camera.CameraInfo().also { Camera.getCameraInfo(i,it) }.facing
+                if(facing!=Camera.CameraInfo.CAMERA_FACING_BACK)continue
+                val cam=Camera.open(i)
+                try {
+                    val params=cam.parameters
+                    if(params.supportedFlashModes?.contains(Camera.Parameters.FLASH_MODE_TORCH)!=true) {
+                        cam.release();continue
+                    }
+                    params.flashMode=Camera.Parameters.FLASH_MODE_TORCH
+                    cam.parameters=params
+                    val surface=SurfaceTexture(0)
+                    cam.setPreviewTexture(surface);cam.startPreview()
+                    legacyTorchCamera=cam;legacyTorchSurface=surface
+                    torch=true;info="הפנס פועל";display.invalidate();return
+                }catch(_:Exception){cam.release()}
+            }
+        }catch(_:Exception){}
+        try {
+            val id=torchId ?: throw IllegalStateException("no flash")
+            getSystemService(CameraManager::class.java).setTorchMode(id,true)
+            torch=true;info="הפנס פועל"
+        }catch(_:Exception){warn("הפנס אינו זמין כעת — בדוק שהמצלמה סגורה")}
+        display.invalidate()
     }
     private fun startRecording() {
         if (safeMode) { warn("הקלטה חסומה במצב בטוח"); return }
@@ -401,9 +526,12 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         } catch (e: Exception) { closeCamera(); warn("המצלמה אינה זמינה") }
     }
     private fun switchCamera() {
-        if (Camera.getNumberOfCameras() < 2) return
+        if (safeMode) { warn("מצלמה אינה זמינה במצב בטוח");return }
+        if (videoRecorder != null) { warn("עצור צילום וידאו לפני סיבוב המצלמה");return }
+        if (Camera.getNumberOfCameras() < 2) { warn("אין מצלמה נוספת במכשיר");return }
         cameraIndex = (cameraIndex + 1) % Camera.getNumberOfCameras()
         texture?.surfaceTexture?.let { openCamera(it) }
+        info=if(cameraIndex==0)"מצלמה אחורית" else "מצלמה קדמית"
     }
     private fun takePhoto() {
         if (safeMode) { warn("צילום חסום במצב בטוח"); return }
@@ -529,7 +657,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         private var canvasForPicture: Canvas? = null
         override fun onDraw(c: Canvas) {
             c.save(); c.scale(width / 480f, height / 640f)
-            val cameraLike = feature == "camera" || (feature == "videos" && opened)
+            val cameraLike = feature == "camera" || (opened && video != null && feature in listOf("videos","files"))
             if (!cameraLike) c.drawColor(0xFF181722.toInt())
             else { p.color = 0xFF191724.toInt(); c.drawRect(0f, 0f, 480f, 78f, p); c.drawRect(0f, 535f, 480f, 640f, p) }
             p.color = 0xFF383447.toInt(); c.drawRect(0f, 0f, 480f, 34f, p)
@@ -558,7 +686,26 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                     }
                     canvasForPicture = null
                 }
-                "videos", "music", "files", "recorder" -> {
+                "files" -> {
+                    text(c,fileFolders.joinToString(" / "){it.second}.takeLast(40),449f,113f,17f,orange)
+                    if(opened) {
+                        val entry=items.getOrNull(cursor)
+                        if(entry?.mime?.startsWith("image/")==true) {
+                            canvasForPicture=c;picture(entry.uri,15f,137f,450f,392f);canvasForPicture=null
+                        }
+                        text(c,entry?.title.orEmpty().take(42),449f,557f,18f)
+                    }else if(items.isEmpty()) text(c,info.ifBlank{"התיקייה ריקה"},449f,272f,20f)
+                    else {
+                        val first=(cursor/7)*7
+                        items.drop(first).take(7).forEachIndexed { i,entry ->
+                            val y=139f+i*57f
+                            if(first+i==cursor){p.color=orange;c.drawRect(0f,y,480f,y+54f,p)}
+                            text(c,(if(entry.mime==folderMime)"▣  " else "▤  ")+entry.title.take(32),449f,y+35f,21f)
+                        }
+                        text(c,"${cursor+1}/${items.size}   # בחירת תיקייה",449f,552f,17f)
+                    }
+                }
+                "videos", "music", "recorder" -> {
                     if (feature == "recorder") {
                         text(c, if (safeMode) "OK להאזנה להקלטה" else if (recorder == null) "OK להתחיל הקלטה" else "● מקליט... OK לעצירה",
                             449f, 113f, 20f, orange)
@@ -577,7 +724,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
                     p.color = orange; c.drawCircle(240f, 573f, 26f, p)
                     p.color = Color.WHITE; c.drawCircle(240f, 573f, 18f, p)
                     text(c, (if (cameraVideoMode) "וידאו" else "תמונה") +
-                        "   # החלפה · OK צילום · ↑ מצלמה", 452f, 517f, 18f)
+                        "   # מצב · OK צילום · 0/שמאל סובב", 452f, 517f, 18f)
                 }
                 "flashlight" -> {
                     p.color = if (torch) 0xFFFFD671.toInt() else 0xFF555164.toInt()
@@ -640,7 +787,7 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
             if (info.isNotEmpty() && feature !in listOf("gallery", "videos", "music", "files"))
                 text(c, info.take(48), 240f, 531f, 16f, orange, Paint.Align.CENTER)
             p.color = 0xFF282537.toInt(); c.drawRect(0f, 583f, 480f, 640f, p)
-            text(c, if (feature == "camera") "אפשרויות" else "בחר", 35f, 620f, 18f,
+            text(c, if (feature == "camera") "סובב" else if(feature=="files")"תיקייה" else "בחר", 35f, 620f, 18f,
                 white, Paint.Align.LEFT)
             text(c, "אישור", 240f, 620f, 18f, white, Paint.Align.CENTER)
             text(c, "חזרה", 447f, 620f, 18f)

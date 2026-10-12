@@ -56,10 +56,14 @@ class MainActivity : Activity() {
     private var demoSpeaker = false
     private var demoMuted = false
     private var lastPhysicalKey = ""
+    private var screenStarted = false
     private var exitReceiverRegistered = false
     private val exitReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == TouchShieldService.ACTION_EXIT) leaveMode()
+            when (intent?.action) {
+                TouchShieldService.ACTION_EXIT -> leaveMode()
+                TouchShieldService.ACTION_END_KEY -> if(screenStarted)back()
+            }
         }
     }
     private var dial = ""
@@ -102,7 +106,7 @@ class MainActivity : Activity() {
         ModeStore.start(this)
         applyImmersiveMode()
         ui = NokiaView(); setContentView(ui); handler.post(clockTick)
-        val filter = IntentFilter(TouchShieldService.ACTION_EXIT)
+        val filter = IntentFilter().apply { addAction(TouchShieldService.ACTION_EXIT); addAction(TouchShieldService.ACTION_END_KEY) }
         if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(exitReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(exitReceiver, filter)
         exitReceiverRegistered = true
@@ -122,8 +126,8 @@ class MainActivity : Activity() {
             }
         }, 350)
     }
-    override fun onStart() { super.onStart(); NokiaSession.onScreenStarted() }
-    override fun onStop() { NokiaSession.onScreenStopped(); super.onStop() }
+    override fun onStart() { super.onStart(); screenStarted=true;NokiaSession.onScreenStarted() }
+    override fun onStop() { screenStarted=false;NokiaSession.onScreenStopped(); super.onStop() }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) window.decorView.post { applyImmersiveMode() }
@@ -191,19 +195,25 @@ class MainActivity : Activity() {
         }
         ui.invalidate(); return true
     }
-    private fun startHomeDial(first:String) { dial=first;dialerReturn=Screen.HOME;if(contacts.isEmpty() && checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED)loadContacts();open(Screen.DIALER) }
-    private fun move(n:Int) { when(screen) { Screen.SNAKE -> turnSnake(0,n); Screen.MENU -> {val next=cursor+n*3;if(next in menus.indices)cursor=next}; Screen.CALC -> calcInput += if(n<0) "*" else "/"; Screen.COMPOSE -> editor.commit(); else -> cursor=(cursor+n).coerceIn(0,maxIndex()) } }
+    private fun startHomeDial(first:String) { val origin=screen; dial=first;dialerReturn=origin;if(contacts.isEmpty() && checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED)loadContacts();open(Screen.DIALER) }
+    private fun move(n:Int) { when(screen) {
+        Screen.SNAKE -> turnSnake(0,n)
+        Screen.MENU -> cursor=(cursor+n*3).coerceIn(0,menus.lastIndex)
+        Screen.CALC -> calcInput += if(n<0) "*" else "/"
+        Screen.COMPOSE -> editor.commit()
+        else -> cursor=(cursor+n).coerceIn(0,maxIndex())
+    } }
     private fun horizontal(n:Int) { when(screen) {
         Screen.SNAKE -> turnSnake(n,0)
         Screen.DEMO_CALL -> if(n<0)demoSpeaker=!demoSpeaker else demoMuted=!demoMuted
         Screen.CALC -> calcInput += if(n<0) "-" else "+"
         Screen.COMPOSE -> editor.move(n)
-        Screen.MENU -> { val next=cursor+n; if(next in menus.indices && next/3==cursor/3)cursor=next }
+        Screen.MENU -> { val next=cursor+n; if(next in menus.indices)cursor=next }
         Screen.QUICK_SETTINGS -> if(cursor==0 && ModeStore.get(this)!=NokiaMode.SAFE) setQuickBrightness((quickBrightness+n).coerceIn(0,5))
         else -> cursor=(cursor+n).coerceIn(0,maxIndex())
     } }
     private fun maxIndex() = when(screen){Screen.MENU->menus.lastIndex; Screen.CONTACTS->(visibleContacts().size-1).coerceAtLeast(0); Screen.THREADS->(smsAddresses.size-1).coerceAtLeast(0); Screen.CONVERSATION->(selectedThread.size-1).coerceAtLeast(0); Screen.CALLLOG->(callRows.size-1).coerceAtLeast(0); Screen.SETTINGS->4; Screen.QUICK_SETTINGS->3; else->0}
-    private fun enterDigit(d:String) { when(screen){Screen.HOME->startHomeDial(d);Screen.DIALER->dial+=d; Screen.RECIPIENT->recipientNumber+=d; Screen.COMPOSE->{editor.insert(d,android.os.SystemClock.elapsedRealtime());messageText=editor.text}; Screen.CALC->calcInput+=when(d){"*"->"*";"#"->"/";else->d}; Screen.SNAKE->when(d){"2"->turnSnake(0,-1);"8"->turnSnake(0,1);"4"->turnSnake(-1,0);"6"->turnSnake(1,0);else->{}};Screen.CONTACTS->{searchEditor.insert(d,android.os.SystemClock.elapsedRealtime());contactSearch=searchEditor.text;cursor=0};else->{}} }
+    private fun enterDigit(d:String) { when(screen){Screen.HOME,Screen.MENU->startHomeDial(d);Screen.DIALER->dial+=d; Screen.RECIPIENT->recipientNumber+=d; Screen.COMPOSE->{editor.insert(d,android.os.SystemClock.elapsedRealtime());messageText=editor.text}; Screen.CALC->calcInput+=when(d){"*"->"*";"#"->"/";else->d}; Screen.SNAKE->when(d){"2"->turnSnake(0,-1);"8"->turnSnake(0,1);"4"->turnSnake(-1,0);"6"->turnSnake(1,0);else->{}};Screen.CONTACTS->{searchEditor.insert(d,android.os.SystemClock.elapsedRealtime());contactSearch=searchEditor.text;cursor=0};else->{}} }
     private fun turnSnake(dx:Int,dy:Int){if(dx==-snakeDirection.first&&dy==-snakeDirection.second)return;snakeDirection=Pair(dx,dy)}
     private fun snakeStep(dx:Int,dy:Int){val head=snakeBody.first();val next=Pair((head.first+dx+20)%20,(head.second+dy+20)%20);if(snakeBody.dropLast(1).contains(next)){snakeBody.clear();snakeBody.addAll(listOf(Pair(5,5),Pair(4,5),Pair(3,5)));snakeScore=0;snakeDirection=Pair(1,0);return};snakeBody.add(0,next);snakeX=next.first;snakeY=next.second;if(next.first==foodX&&next.second==foodY){snakeScore++;foodX=(foodX*7+3)%20;foodY=(foodY*11+5)%20}else snakeBody.removeAt(snakeBody.lastIndex)}
     private fun select() { when(screen) {
@@ -211,7 +221,7 @@ class MainActivity : Activity() {
         Screen.MENU -> when(cursor){
             0->feature("gallery");1->{contactsReturn=Screen.MENU;searchEditor.reset();contactSearch="";loadContacts();open(Screen.CONTACTS)}
             2->{loadCallLog();open(Screen.CALLLOG)};3->feature("camera")
-            4->{threadsReturn=Screen.MENU;loadSms();open(Screen.THREADS)};5->open(Screen.SNAKE)
+            4->{threadsReturn=Screen.MENU;prepareThreads();open(Screen.THREADS)};5->open(Screen.SNAKE)
             6->feature("ninja");7->open(Screen.SETTINGS);8->feature("videos")
             9->feature("music");10->feature("alarms");11->open(Screen.CALC)
             12->feature("flashlight");13->feature("recorder");14->feature("calendar")
@@ -227,7 +237,7 @@ class MainActivity : Activity() {
             2 -> openSystemSettings(Settings.ACTION_WIFI_SETTINGS)
             3 -> openSystemSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
         }
-        Screen.THREADS -> {val address=smsAddresses.getOrNull(cursor);if(address!=null){selectedThread=smsItems.filter{it.address==address}.sortedBy{it.date}.toMutableList();composeNumber=address;open(Screen.CONVERSATION)}else newMessage()}
+        Screen.THREADS -> {val address=smsAddresses.getOrNull(cursor);if(address!=null){selectedThread=smsItems.filter{threadKey(it.address)==threadKey(address)}.sortedBy{it.date}.toMutableList();composeNumber=address;open(Screen.CONVERSATION);cursor=(selectedThread.size-1).coerceAtLeast(0)}else newMessage()}
         Screen.RECIPIENT -> if (recipientNumber.any { it.isDigit() }) {
             composeNumber=recipientNumber;editor.reset();messageText="";composeReturn=Screen.THREADS;screen=Screen.COMPOSE
         } else toast("הקלד מספר נמען")
@@ -259,6 +269,7 @@ class MainActivity : Activity() {
     private fun newMessage() { recipientNumber="";screen=Screen.RECIPIENT;cursor=0 }
     private fun back() { when(screen) {
         Screen.HOME -> return
+        Screen.MENU -> screen=Screen.HOME
         Screen.CONTACT -> screen=Screen.CONTACTS
         Screen.CONTACTS -> screen=contactsReturn
         Screen.CONVERSATION -> screen=Screen.THREADS
@@ -273,7 +284,7 @@ class MainActivity : Activity() {
         else -> screen=Screen.MENU
     };cursor=0;ui.invalidate() }
     private fun softLeft(){when(screen){Screen.HOME->{contactsReturn=Screen.HOME;searchEditor.reset();contactSearch="";loadContacts();screen=Screen.CONTACTS};Screen.CONTACT->{composeNumber=selected.number;composeReturn=Screen.CONTACT;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.CONVERSATION->{composeReturn=Screen.CONVERSATION;editor.reset();messageText="";screen=Screen.COMPOSE};Screen.THREADS->newMessage();Screen.COMPOSE->sendSms();else->select()}}
-    private fun softRight(){if(screen==Screen.HOME){threadsReturn=Screen.HOME;loadSms();screen=Screen.THREADS}else back()}
+    private fun softRight(){if(screen==Screen.HOME){threadsReturn=Screen.HOME;prepareThreads();screen=Screen.THREADS}else back()}
     private fun callOrAnswer() {
         if (screen == Screen.DEMO_CALL) { demoCallActive=true; return }
         if (screen == Screen.HOME) { dial="";dialerReturn=Screen.HOME;if(contacts.isEmpty())loadContacts();open(Screen.DIALER);return }
@@ -287,11 +298,21 @@ class MainActivity : Activity() {
     private fun visibleContacts()=if(contactSearch.isBlank())contacts else contacts.filter{it.number.contains(contactSearch)||it.name.contains(contactSearch,true)}
     private fun dialName():String {val digits=dial.filter{it.isDigit()};if(digits.length<3)return "";return contacts.firstOrNull{person->person.number.filter{it.isDigit()}==digits}?.name.orEmpty()}
     private fun loadContacts() { if(checkSelfPermission(Manifest.permission.READ_CONTACTS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת אנשי קשר");return}; try { contacts.clear(); val c=contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,ContactsContract.CommonDataKinds.Phone.NUMBER),null,null,ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME+" COLLATE LOCALIZED ASC"); c?.use { while(it.moveToNext()) contacts.add(Person(it.getString(0)?:"ללא שם",it.getString(1)?:"")) };ui.invalidate() }catch(_:Exception){toast("לא ניתן לקרוא אנשי קשר")} }
-    private fun loadSms(){smsItems.clear();smsAddresses.clear();if(demoMode){smsItems.addAll(demoOutbox.sortedByDescending{it.date});smsAddresses=smsItems.map{it.address}.filter{it.isNotBlank()}.distinct().toMutableList();return};if(checkSelfPermission(Manifest.permission.READ_SMS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת הודעות");return};try{contentResolver.query(Uri.parse("content://sms"),arrayOf("address","body","date","type"),null,null,"date DESC")?.use{c->while(c.moveToNext()){val address=c.getString(0)?:"";smsItems.add(SmsItem(address,c.getString(1)?:"",c.getLong(2),c.getInt(3)))}};smsItems.sortByDescending{it.date};smsAddresses=smsItems.map{it.address}.filter{it.isNotBlank()}.distinct().toMutableList()}catch(_:Exception){toast("לא ניתן לקרוא הודעות")}}
+    private fun prepareThreads() { if(contacts.isEmpty() && checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED)loadContacts();loadSms() }
+    private fun contactName(number:String):String {
+        val digits=number.filter(Char::isDigit)
+        if(digits.length<7)return number
+        return contacts.firstOrNull { it.number.filter(Char::isDigit).takeLast(7)==digits.takeLast(7) }?.name ?: number
+    }
+    private fun threadKey(address:String):String {
+        val digits=address.filter(Char::isDigit)
+        return if(digits.length>=9) digits.takeLast(9) else address.trim().lowercase(Locale.ROOT)
+    }
+    private fun loadSms(){smsItems.clear();smsAddresses.clear();if(demoMode){smsItems.addAll(demoOutbox.sortedByDescending{it.date});smsAddresses=smsItems.map{it.address}.filter{it.isNotBlank()}.distinctBy(::threadKey).toMutableList();return};if(checkSelfPermission(Manifest.permission.READ_SMS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת הודעות");return};try{contentResolver.query(Uri.parse("content://sms"),arrayOf("address","body","date","type"),null,null,"date DESC")?.use{c->while(c.moveToNext()){val address=c.getString(0)?:"";smsItems.add(SmsItem(address,c.getString(1)?:"",c.getLong(2),c.getInt(3)))}};smsItems.sortByDescending{it.date};smsAddresses=smsItems.map{it.address}.filter{it.isNotBlank()}.distinctBy(::threadKey).toMutableList()}catch(_:Exception){toast("לא ניתן לקרוא הודעות")}}
     private var callRows=mutableListOf<String>()
     private fun loadCallLog(){callRows.clear();if(checkSelfPermission(Manifest.permission.READ_CALL_LOG)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת יומן שיחות");return};try{contentResolver.query(android.provider.CallLog.Calls.CONTENT_URI,arrayOf(android.provider.CallLog.Calls.NUMBER,android.provider.CallLog.Calls.TYPE),null,null,android.provider.CallLog.Calls.DATE+" DESC")?.use{c->while(c.moveToNext()){val t=when(c.getInt(1)){android.provider.CallLog.Calls.INCOMING_TYPE->"נכנסת";android.provider.CallLog.Calls.MISSED_TYPE->"שלא נענתה";else->"יוצאת"};callRows.add("$t   ${c.getString(0)?:""}")}}}catch(_:Exception){toast("לא ניתן לקרוא יומן שיחות")}}
     override fun onRequestPermissionsResult(requestCode:Int, permissions:Array<out String>, grantResults:IntArray){super.onRequestPermissionsResult(requestCode,permissions,grantResults);if(requestCode==10&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)loadContacts() else if(requestCode==11&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)callOrAnswer() else if(requestCode==12&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)sendSms() else if(requestCode==13&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)loadCallLog() else if(requestCode==14&&grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)loadSms() else if(grantResults.firstOrNull()!=PackageManager.PERMISSION_GRANTED)toast("ההרשאה לא ניתנה; הפונקציה אינה זמינה");ui.invalidate()}
-    private fun sendSms(){if(composeNumber.isBlank()){toast("בחר איש קשר תחילה");return};if(messageText.isBlank()){toast("כתוב הודעה לפני השליחה");return};editor.commit();if(demoMode){val fake=SmsItem(composeNumber,messageText,System.currentTimeMillis(),2);demoOutbox.add(fake);smsItems.add(0,fake);if(!smsAddresses.contains(composeNumber))smsAddresses.add(0,composeNumber);toast("הודעת הדגמה נשמרה — לא נשלח SMS");editor.reset();messageText="";screen=Screen.THREADS;return};if(checkSelfPermission(Manifest.permission.SEND_SMS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת שליחת SMS");return};try{val sms=SmsManager.getDefault();val parts=sms.divideMessage(messageText);if(parts.size>1)sms.sendMultipartTextMessage(composeNumber,null,ArrayList(parts),null,null) else sms.sendTextMessage(composeNumber,null,messageText,null,null);try{val values=ContentValues().apply{put("address",composeNumber);put("body",messageText);put("date",System.currentTimeMillis());put("read",1);put("seen",1);put("type",2)};contentResolver.insert(Uri.parse("content://sms/sent"),values)}catch(_:Exception){};toast("בקשת השליחה הועברה למערכת");editor.reset();messageText="";screen=Screen.THREADS;loadSms()}catch(e:Exception){toast("שליחת הודעה נכשלה")}}
+    private fun sendSms(){if(composeNumber.isBlank()){toast("בחר איש קשר תחילה");return};if(messageText.isBlank()){toast("כתוב הודעה לפני השליחה");return};editor.commit();if(demoMode){val fake=SmsItem(composeNumber,messageText,System.currentTimeMillis(),2);demoOutbox.add(fake);loadSms();toast("הודעת הדגמה נשמרה — לא נשלח SMS");editor.reset();messageText="";screen=Screen.THREADS;cursor=smsAddresses.indexOfFirst{threadKey(it)==threadKey(composeNumber)}.coerceAtLeast(0);return};if(checkSelfPermission(Manifest.permission.SEND_SMS)!=PackageManager.PERMISSION_GRANTED){toast("אין הרשאת שליחת SMS");return};try{val sms=SmsManager.getDefault();val parts=sms.divideMessage(messageText);if(parts.size>1)sms.sendMultipartTextMessage(composeNumber,null,ArrayList(parts),null,null) else sms.sendTextMessage(composeNumber,null,messageText,null,null);try{val values=ContentValues().apply{put("address",composeNumber);put("body",messageText);put("date",System.currentTimeMillis());put("read",1);put("seen",1);put("type",2)};contentResolver.insert(Uri.parse("content://sms/sent"),values)}catch(_:Exception){};toast("בקשת השליחה הועברה למערכת");editor.reset();messageText="";screen=Screen.THREADS;loadSms();cursor=smsAddresses.indexOfFirst{threadKey(it)==threadKey(composeNumber)}.coerceAtLeast(0)}catch(e:Exception){toast("שליחת הודעה נכשלה")}}
     private fun launchCamera(){if(demoMode){open(Screen.HELP,"מצלמה מדומה. במצב זה לא מצולמת תמונה.");return};try{startActivity(Intent(MediaStore.ACTION_IMAGE_CAPTURE))}catch(e:Exception){toast("לא נמצאה מצלמה")}}
     private fun toast(s:String){Toast.makeText(this,s,Toast.LENGTH_SHORT).show()}
     private fun precedence(op:Char)=if(op=='+'||op=='-')1 else 2
@@ -325,16 +346,16 @@ class MainActivity : Activity() {
         }
         override fun onDraw(c:Canvas){super.onDraw(c);val sx=width/480f;val sy=height/640f;c.save();c.scale(sx,sy);p.shader=android.graphics.LinearGradient(0f,0f,0f,640f,Color.rgb(55,52,74),bg,android.graphics.Shader.TileMode.CLAMP);c.drawRect(0f,0f,480f,640f,p);p.shader=null;p.color=Color.rgb(49,48,69);c.drawRect(0f,0f,480f,34f,p);txt(c,"NOKIA",18f,23f,15f,Color.WHITE,Paint.Align.LEFT);drawSignal(c,347f,9f);drawBattery(c,379f,9f);txt(c,"$batteryPct%",423f,23f,13f,Color.WHITE);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),462f,23f,15f,Color.WHITE,Paint.Align.RIGHT)
             when(screen){Screen.HOME->{drawMoon(c);txt(c,SimpleDateFormat("HH:mm",Locale("he","IL")).format(Date()),240f,172f,70f,Color.WHITE,Paint.Align.CENTER);txt(c,SimpleDateFormat("dd.MM.yyyy  EEEE",Locale("he","IL")).format(Date()),240f,211f,22f,Color.WHITE,Paint.Align.CENTER);txt(c,"◧  019",30f,277f,19f,Color.WHITE,Paint.Align.LEFT);txt(c,"SIM 1",30f,308f,16f,Color.WHITE,Paint.Align.LEFT)}
-                Screen.MENU->{drawMoon(c);title(c,menus[cursor]);drawGrid(c)}
+                Screen.MENU->{drawMoon(c);title(c,menus[cursor]);drawGrid(c);txt(c,"עמוד ${cursor/9+1} מתוך ${(menus.size+8)/9}",240f,553f,17f,Color.WHITE,Paint.Align.CENTER)}
                 Screen.CONTACTS->{title(c,if(contactSearch.isBlank())"אנשי קשר" else "חיפוש: $contactSearch");val list=visibleContacts().map{it.name+"   "+it.number};if(list.isEmpty())txt(c,"אין התאמות",240f,300f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,list,cursor)}
                 Screen.CONTACT->{title(c,selected.name);txt(c,selected.number,240f,260f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,"OK: חייג   CALL: שיחה",240f,500f,17f,green,Paint.Align.CENTER)}
                 Screen.DIALER->drawDialer(c)
                 Screen.PRODUCT_INFO->drawProductInfo(c)
                 Screen.QUICK_SETTINGS->drawQuickSettings(c)
                 Screen.DEMO_CALL->{title(c,"שיחה מדומה");p.color=0xFFB5C8DA.toInt();c.drawCircle(240f,224f,92f,p);txt(c,dialName().take(1).ifBlank{"◉"},240f,258f,84f,Color.BLACK,Paint.Align.CENTER);txt(c,dialName().ifBlank{dial},240f,380f,28f,Color.WHITE,Paint.Align.CENTER);txt(c,if(demoCallActive)"שיחה מדומה פעילה" else "מתבצע חיוג מדומה...",240f,415f,20f,green,Paint.Align.CENTER);txt(c,(if(demoSpeaker)"רמקול: פועל" else "רמקול")+"        "+(if(demoMuted)"מושתק" else "השתקה"),240f,519f,19f,Color.WHITE,Paint.Align.CENTER);txt(c,"← רמקול   → השתקה   END סיום",240f,561f,15f,Color.WHITE,Paint.Align.CENTER)}
-                Screen.THREADS->{title(c,"הודעות");if(smsAddresses.isEmpty())txt(c,if(demoMode)"אין הודעות · לחץ חדש" else "אין שרשורים · לחץ חדש",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,smsAddresses.map{a->a+"   "+(smsItems.firstOrNull{it.address==a}?.body?:"")},cursor)}
+                Screen.THREADS->drawThreads(c)
                 Screen.RECIPIENT->{title(c,"הודעה חדשה");txt(c,"מספר נמען",440f,165f,23f,green);txt(c,recipientNumber.ifBlank{"הקלד מספר במקשים"},440f,235f,33f,Color.WHITE);txt(c,"OK לכתיבה · מחיקה לתיקון",440f,520f,18f,Color.WHITE)}
-                Screen.CONVERSATION->{title(c,composeNumber);selectedThread.drop(cursor).take(7).forEachIndexed{i,item->val who=if(item.type==2)"אני" else item.address;txt(c,"$who:",430f,120f+i*54f,17f,green);txt(c,item.body.take(38),420f,143f+i*54f,17f,Color.WHITE)}}
+                Screen.CONVERSATION->{title(c,contactName(composeNumber).take(22));selectedThread.drop((cursor-4).coerceAtLeast(0)).take(5).forEachIndexed{i,item->val who=if(item.type==2)"אני" else contactName(item.address);txt(c,"$who:",430f,125f+i*88f,19f,green);txt(c,item.body.replace('\n',' ').take(45),420f,155f+i*88f,20f,Color.WHITE)}}
                 Screen.CALLLOG->{title(c,"יומן שיחות");if(callRows.isEmpty())txt(c,"אין רשומות או שאין הרשאה",240f,260f,20f,Color.WHITE,Paint.Align.CENTER) else drawRows(c,callRows,cursor)}
                 Screen.COMPOSE->{title(c,"כתיבת הודעה");txt(c,composeNumber,440f,115f,19f,Color.WHITE);wrap(c,messageText,35f,160f,410f,28f);txt(c,when(editor.mode){MultiTapEngine.Mode.HEBREW->"עברית";MultiTapEngine.Mode.ENGLISH->"English";MultiTapEngine.Mode.NUMBERS->"123"}+"   # החלפה · 0 רווח · * סימנים",440f,524f,17f,green);txt(c,"${messageText.length} תווים",38f,553f,16f,Color.LTGRAY,Paint.Align.LEFT)}
                 Screen.GALLERY,Screen.VIDEOS->{title(c,if(screen==Screen.GALLERY)"תמונות" else "סרטונים");txt(c,"פתיחה דרך גלריית Android",240f,280f,20f,Color.WHITE,Paint.Align.CENTER)}
@@ -371,7 +392,7 @@ class MainActivity : Activity() {
                 p.color=0xFF83C7FB.toInt();c.drawRect(24f,112f,29f,533f,p)
                 txt(c,"מידע מוצר",449f,143f,36f,Color.WHITE)
                 txt(c,"Software Version:",448f,195f,27f,Color.WHITE)
-                val version=try{packageManager.getPackageInfo(packageName,0).versionName?:"1.4"}catch(_:Exception){"1.4"}
+                val version=try{packageManager.getPackageInfo(packageName,0).versionName?:"1.5.0"}catch(_:Exception){"1.5.0"}
                 txt(c,"NokiaFake $version",448f,227f,27f,Color.WHITE)
                 txt(c,"TA model name:",448f,281f,27f,Color.WHITE)
                 txt(c,"Nokia 225 4G (ממשק)",448f,314f,26f,Color.WHITE)
@@ -399,12 +420,31 @@ class MainActivity : Activity() {
                 val craters=arrayOf(floatArrayOf(189f,238f,30f),floatArrayOf(302f,198f,22f),floatArrayOf(340f,290f,37f),floatArrayOf(237f,358f,44f),floatArrayOf(369f,394f,24f),floatArrayOf(157f,327f,18f))
                 for(crater in craters){p.color=0x45622F60;p.style=Paint.Style.STROKE;p.strokeWidth=6f;c.drawCircle(crater[0],crater[1],crater[2],p);p.color=0x33612C5C;p.style=Paint.Style.FILL;c.drawCircle(crater[0]+5f,crater[1]+5f,crater[2]*0.68f,p)}
             }
+            private fun drawThreads(c:Canvas) {
+                title(c,"הודעות")
+                if(smsAddresses.isEmpty()) {txt(c,if(demoMode)"אין הודעות · לחץ חדש" else "אין שרשורים · לחץ חדש",240f,260f,22f,Color.WHITE,Paint.Align.CENTER);return}
+                val start=(cursor/5)*5
+                smsAddresses.drop(start).take(5).forEachIndexed { i,address ->
+                    val y=88f+i*96f
+                    if(start+i==cursor) {p.color=0xFFEE6838.toInt();c.drawRect(0f,y,480f,y+92f,p)}
+                    else {p.color=0xFF333047.toInt();c.drawRect(0f,y+91f,480f,y+92f,p)}
+                    val latest=smsItems.firstOrNull{threadKey(it.address)==threadKey(address)}
+                    val count=smsItems.count{threadKey(it.address)==threadKey(address)}
+                    txt(c,contactName(address).take(22),448f,y+30f,25f,Color.WHITE)
+                    txt(c,(latest?.body?:"").replace('\n',' ').take(38),448f,y+60f,19f,0xFFDFE0EA.toInt())
+                    val date=latest?.let { SimpleDateFormat(if(System.currentTimeMillis()-it.date<86_400_000L) "HH:mm" else "dd.MM",Locale("he","IL")).format(Date(it.date)) }.orEmpty()
+                    txt(c,"$count · $date",30f,y+29f,16f,Color.WHITE,Paint.Align.LEFT)
+                }
+                txt(c,"${cursor+1} / ${smsAddresses.size}",240f,565f,17f,Color.LTGRAY,Paint.Align.CENTER)
+            }
             private fun drawGrid(c:Canvas){
                 val colors=intArrayOf(0xFFFBD54A.toInt(),0xFF27C4E3.toInt(),0xFF33CFB6.toInt(),0xFFEEEAF0.toInt(),0xFF42D3BE.toInt(),0xFFE95B9D.toInt(),0xFF7BB5FE.toInt(),0xFF7EB8EE.toInt(),0xFFE64F9D.toInt(),0xFFFBD54A.toInt(),0xFF69DBE2.toInt(),0xFF4BC4D9.toInt(),0xFFF7E493.toInt(),0xFFE7789D.toInt(),0xFFC4DCF0.toInt(),0xFF8BDC93.toInt(),0xFFF7B675.toInt())
-                for(i in menus.indices){
-                    val x=86f+(i%3)*154f;val y=125f+(i/3)*76f
+                val first=(cursor/9)*9
+                for(i in first until minOf(first+9,menus.size)){
+                    val x=86f+(i%3)*154f;val y=178f+((i-first)/3)*145f
                     if(i==cursor){p.color=0xFFFF633E.toInt();p.style=Paint.Style.STROKE;p.strokeWidth=4f;c.drawCircle(x,y,31f,p);p.style=Paint.Style.FILL}
                     drawGridIcon(c,i,x,y,colors[i])
+                    txt(c,menus[i],x,y+54f,18f,Color.WHITE,Paint.Align.CENTER)
                 }
             }
             private fun drawGridIcon(c:Canvas,id:Int,x:Float,y:Float,color:Int){
