@@ -640,11 +640,24 @@ class FeatureActivity : Activity(), TextureView.SurfaceTextureListener {
         private fun picture(uri: Uri, x: Float, y: Float, w: Float, h: Float) {
             try {
                 val key = uri.toString() + ":" + w.toInt() + ":" + h.toInt()
-                val bmp = pictureCache.get(key) ?: (if (Build.VERSION.SDK_INT >= 29)
-                    contentResolver.loadThumbnail(uri, android.util.Size(w.toInt().coerceAtLeast(1),
-                        h.toInt().coerceAtLeast(1)), null)
-                else contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) })
-                    ?.also { pictureCache.put(key, it) }
+                val bmp = pictureCache.get(key) ?: run {
+                    val thumbnail = try {
+                        if (Build.VERSION.SDK_INT >= 29) contentResolver.loadThumbnail(uri,
+                            android.util.Size(w.toInt().coerceAtLeast(1), h.toInt().coerceAtLeast(1)), null)
+                        else null
+                    } catch (_: Exception) { null }
+                    val bitmap = thumbnail ?: run {
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                        var sample = 1
+                        while (bounds.outWidth / sample > w * 2 || bounds.outHeight / sample > h * 2)
+                            sample *= 2
+                        contentResolver.openInputStream(uri)?.use {
+                            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+                        }
+                    }
+                    bitmap?.also { pictureCache.put(key, it) }
+                }
                 if (bmp != null) {
                     val ratio = minOf(w / bmp.width, h / bmp.height)
                     val dstW = bmp.width * ratio; val dstH = bmp.height * ratio
