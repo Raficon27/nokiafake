@@ -392,7 +392,7 @@ class MainActivity : Activity() {
                 p.color=0xFF83C7FB.toInt();c.drawRect(24f,112f,29f,533f,p)
                 txt(c,"מידע מוצר",449f,143f,36f,Color.WHITE)
                 txt(c,"Software Version:",448f,195f,27f,Color.WHITE)
-                val version=try{packageManager.getPackageInfo(packageName,0).versionName?:"1.5.0"}catch(_:Exception){"1.5.0"}
+                val version=try{packageManager.getPackageInfo(packageName,0).versionName?:"1.5.1"}catch(_:Exception){"1.5.1"}
                 txt(c,"NokiaFake $version",448f,227f,27f,Color.WHITE)
                 txt(c,"TA model name:",448f,281f,27f,Color.WHITE)
                 txt(c,"Nokia 225 4G (ממשק)",448f,314f,26f,Color.WHITE)
